@@ -88,7 +88,7 @@ const HomePage = () => {
             {/* Card 2 */}
             <div className="bg-white shadow-md rounded-lg p-6 text-center">
               <div className="w-full h-40 bg-gray-200 mb-4 flex items-center justify-center rounded">
-                <img src="visuals.png" alt="Market Analysis" className="h-full object-contain"/>
+                <img src="Visuals.png" alt="Market Analysis" className="h-full object-contain"/>
               </div>
               <h4 className="text-xl font-semibold text-gray-800 mb-2">Detailed Visualizations</h4>
               <p className="text-gray-600 mb-4">
