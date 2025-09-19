@@ -1,5 +1,8 @@
 services:
   # A Docker web service
+  envVars:
+  - key: OPEN_AI_API
+    value: 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
   - type: web
     name: fastapi-example
     runtime: python
