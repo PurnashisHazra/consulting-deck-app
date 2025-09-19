@@ -1,0 +1,3 @@
+    Available Frameworks: {[fw['name'] for fw in DATA_FRAMEWORKS]}
+
+Available Chart Types: {[chart['name'] for chart in CHART_REPO]}
