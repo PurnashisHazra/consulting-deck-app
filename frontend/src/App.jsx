@@ -8,7 +8,8 @@ import HomePage from "./components/HomePage";
 import PricingPage from "./components/PricingPage";
 import BuyCoins from "./components/BuyCoins";
 import toast, { Toaster } from 'react-hot-toast';
-
+import ReactGA from 'react-ga4';
+const TRACKING_ID = "G-94GTC11LBH"; 
 // Mock data for testing layout
 // Auth Context for best practices
 export const AuthContext = createContext();
@@ -155,6 +156,7 @@ function App() {
   const [showCoinDropdown, setShowCoinDropdown] = useState(false);
   // Fetch user name if authenticated
   useEffect(() => {
+    
     const fetchUserName = async () => {
       
         try {
@@ -185,6 +187,12 @@ function App() {
       fetchUserName();
     }
   }, [isAuthenticated, token, setIsAuthenticated, setToken, navigate]);
+
+  useEffect(() => {
+        ReactGA.initialize(TRACKING_ID);
+        // Send pageview with a custom path
+        ReactGA.send({ hitType: "pageview", page: "/mainpage", title: "Main Page" });
+    }, []);
   const handleLogout = () => {
       // 1. Remove token (replace 'authToken' with your token key)
       localStorage.removeItem("token");
