@@ -41,6 +41,7 @@ app.add_middleware(
         "http://localhost:3000",  # Frontend URL
         "http://127.0.0.1:3000",  # Alternative localhost
         "https://pitchmate.in",
+        "https://www.pitchmate.in",
         "https://consulting-deck-app-it2g.vercel.app"
     ],
     allow_credentials=True,
