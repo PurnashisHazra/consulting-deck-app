@@ -34,7 +34,15 @@ client = OpenAI(api_key=os.getenv('OPEN_AI_API'))
 # Prefer a lightweight, widely available default model; override via OPENAI_MODEL
 MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-app = FastAPI(title="Smart Consulting Deck Generator")
+from contextlib import asynccontextmanager
+from auth import users_collection
+
+@asynccontextmanager
+async def lifespan(app):
+    await users_collection.create_index("email", unique=True)
+    yield
+
+app = FastAPI(title="Smart Consulting Deck Generator", lifespan=lifespan)
 
 # --- CORS ---
 app.add_middleware(

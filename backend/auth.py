@@ -64,7 +64,6 @@ def verify_access_token(token: str):
 @router.post("/signup", response_model=Token)
 async def signup(user: UserCreate):
     try:
-        print("Signup endpoint called")
         existing_user = await users_collection.find_one({"email": user.email})
         if existing_user:
             raise HTTPException(status_code=400, detail="Email already registered")
@@ -73,13 +72,11 @@ async def signup(user: UserCreate):
         await users_collection.insert_one(new_user)
         access_token = create_access_token(data={"sub": user.email})
         return {"access_token": access_token, "token_type": "bearer"}
-    except Exception as e:
-        print(f"Error in signup: {e}")
+    except Exception:
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 @router.post("/login", response_model=Token)
 async def login(user: UserLogin):
-    print("Login endpoint called")
     db_user = await users_collection.find_one({"email": user.email})
     if not db_user or not verify_password(user.password, db_user["password"]):
         raise HTTPException(status_code=400, detail="Invalid credentials")
@@ -89,9 +86,7 @@ async def login(user: UserLogin):
 @router.get("/user")
 async def get_user(token: str = Depends(oauth2_scheme)):
     try:
-        print("--->token in backend:", token)
         payload = pyjwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        print("--->payload in backend   :", payload)
         email = payload.get("sub")
         if email is None:
             raise HTTPException(status_code=401, detail="Invalid token")
@@ -110,7 +105,6 @@ async def get_user(token: str = Depends(oauth2_scheme)):
 @router.post("/consume_coin")
 async def consume_coin(token: str = Depends(oauth2_scheme), data: dict = Body(...)):
     try:
-        print("--->data in consume_coin:", data)
         num_slides = data.get("num_slides",1)
         payload = pyjwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email = payload.get("sub")
