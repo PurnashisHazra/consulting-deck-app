@@ -2,7 +2,8 @@ import { Route, Routes, Navigate, useNavigate } from "react-router-dom";
 import { useState, useEffect, createContext, useContext } from "react";
 import SlideForm from "./components/SlideForm";
 import SlidePreview from "./components/SlidePreview";
-import { generateSlides } from "./api";
+import CanvasSlidePreview from "./components/CanvasSlidePreview";
+import { generateSlides, API_BASE_URL } from "./api";
 import LoginSignup from "./components/LoginSignup";
 import HomePage from "./components/HomePage";
 import PricingPage from "./components/PricingPage";
@@ -15,96 +16,408 @@ const TRACKING_ID = "G-94GTC11LBH";
 export const AuthContext = createContext();
 
 const mockResponse = {
-  "optimized_storyline": [
-    "Market Analysis and Competitive Landscape",
-    "Financial Overview and Projections",
-    "Strategic Recommendations for Revitalization"
-  ],
-  "context_analysis": {
-    "market_trends": "The coffee subscription market is experiencing rapid growth, driven by consumer demand for convenience and quality. The rise of D2C brands has intensified competition, emphasizing the need for unique customer experiences.",
-    "customer_insights": "Existing customers are seeking more personalized and engaging experiences. Churn rates are increasing, indicating dissatisfaction with the current offering.",
-    "competitive_analysis": "Competitors are leveraging technology for personalization and community-building, which The Daily Grind currently lacks."
-  },
-  "slides": [
-    {
-      "slide_number": 1,
-      "title": "Market Analysis and Competitive Landscape",
-      "visualization": "Bar Chart",
-      "frameworks": [
-        "SWOT Analysis",
-        "Porter's Five Forces"
-      ],
-      "content": [
-        "The coffee subscription market is projected to grow at a CAGR of 12% over the next five years.",
-        "Emerging D2C brands are capturing market share by offering personalized experiences and community engagement.",
-        "SWOT Analysis reveals strengths in product quality but weaknesses in digital engagement.",
-        "Porter's Five Forces indicate high competitive rivalry and bargaining power of customers.",
-        "Key opportunities include leveraging technology for personalization and enhancing customer engagement."
-      ],
-      "takeaway": "The competitive landscape is shifting, and immediate action is needed to address market threats and capitalize on opportunities.",
-      "call_to_action": "Conduct a comprehensive market research study to identify customer preferences and trends.",
-      "executive_summary": "The coffee subscription market is evolving rapidly, with increased competition from D2C brands. A detailed analysis of market dynamics reveals critical areas for improvement.",
-      "detailed_analysis": "The analysis indicates that The Daily Grind must enhance its digital presence and customer engagement strategies to remain competitive.",
-      "methodology": "Utilized market research reports, customer surveys, and competitive analysis frameworks to assess the current market landscape.",
-      "data": [
+    "optimized_storyline": [
+        "Valuation Comparables",
+        "Options Assessment",
+        "Recommendation"
+    ],
+    "context_analysis": {},
+    "slides": [
         {
-          "label": "Region A",
-          "value": 120
+            "slide_number": 1,
+            "title": "Valuation Comparables",
+            "slide_archetype": "Data Chart",
+            "layout": {
+                "rows": 2,
+                "columns": 2
+            },
+            "sections": [
+                {
+                    "row": 1,
+                    "col": 1,
+                    "title": "Recent Comparable Transactions",
+                    "content": "Overview of recent SaaS transactions to establish valuation benchmarks.",
+                    "charts": [
+                        "Bar Chart"
+                    ],
+                    "frameworks": [],
+                    "framework_data": [],
+                    "infographics": [],
+                    "chart_data": {
+                        "Bar Chart": {
+                            "xAxisTitle": "Company",
+                            "yAxisTitle": "Valuation ($B)",
+                            "legend": "Recent Comparable Transactions",
+                            "inferences": [
+                                "CloudEdge Inc. achieved the highest valuation among recent transactions.",
+                                "FinOps Ltd. raised significant capital in its Series D round, indicating strong investor interest."
+                            ],
+                            "labels": [
+                                "CloudEdge Inc. (IPO)",
+                                "DataSphere Co. (Acquisition)",
+                                "FinOps Ltd. (Series D)",
+                                "AppStream AG (IPO)"
+                            ],
+                            "values": [
+                                3.2,
+                                2.8,
+                                1.5,
+                                2.0
+                            ]
+                        }
+                    }
+                },
+                {
+                    "row": 1,
+                    "col": 2,
+                    "title": "Valuation Multiples",
+                    "content": "SaaS industry average EV/Revenue multiple: 6.5x; High-growth SaaS (CAGR >25%): 8-10x.",
+                    "charts": [
+                        "Bar Chart"
+                    ],
+                    "frameworks": [],
+                    "framework_data": [],
+                    "infographics": [],
+                    "chart_data": {
+                        "Bar Chart": {
+                            "xAxisTitle": "Company/Category",
+                            "yAxisTitle": "EV/Revenue Multiple (x)",
+                            "legend": "Valuation Multiples Comparison",
+                            "inferences": [
+                                "High-growth SaaS companies command higher multiples.",
+                                "Recent IPOs have varied valuations, reflecting market conditions.",
+                                "TechNova Ltd. could leverage its growth to achieve a favorable valuation."
+                            ],
+                            "labels": [
+                                "SaaS Industry Average",
+                                "High-Growth SaaS (CAGR >25%)",
+                                "CloudEdge Inc. (IPO)",
+                                "DataSphere Co. (Acquisition)",
+                                "FinOps Ltd. (Series D)",
+                                "AppStream AG (IPO)"
+                            ],
+                            "values": [
+                                6.5,
+                                9.0,
+                                8.5,
+                                7.0,
+                                9.0,
+                                6.8
+                            ]
+                        }
+                    }
+                },
+                {
+                    "row": 2,
+                    "col": 1,
+                    "title": "Client Valuation Estimate",
+                    "content": "Estimated valuation based on revenue and EBITDA margin: Valuation = Revenue x EV/Revenue multiple.",
+                    "charts": [
+                        "Waterfall Chart"
+                    ],
+                    "frameworks": [],
+                    "framework_data": [],
+                    "infographics": [],
+                    "chart_data": {
+                        "Waterfall Chart": {
+                            "xAxisTitle": "Valuation Steps",
+                            "yAxisTitle": "Valuation ($M)",
+                            "legend": "Valuation Components",
+                            "inferences": [
+                                "The revenue growth significantly impacts the overall valuation.",
+                                "EBITDA margin improvements contribute positively to net income.",
+                                "Net debt adjustment reduces the final valuation."
+                            ],
+                            "labels": [],
+                            "values": [
+                                420,
+                                540,
+                                710,
+                                930,
+                                76.2,
+                                140,
+                                -120,
+                                3.6
+                            ]
+                        }
+                    }
+                },
+                {
+                    "row": 2,
+                    "col": 2,
+                    "title": "Market Trends",
+                    "content": "Recent IPOs show a 15-20% discount compared to private placements.",
+                    "charts": [
+                        "Line Chart"
+                    ],
+                    "frameworks": [],
+                    "framework_data": [],
+                    "infographics": [],
+                    "chart_data": {
+                        "Line Chart": {
+                            "xAxisTitle": "Valuation Type",
+                            "yAxisTitle": "Valuation ($B)",
+                            "legend": "Valuation Comparables",
+                            "inferences": [
+                                "Recent IPOs show a 15-20% discount compared to private placements.",
+                                "The average valuation for recent IPOs is lower than private placements."
+                            ],
+                            "labels": [
+                                "Recent IPOs",
+                                "Private Placements"
+                            ],
+                            "values": [
+                                2.0,
+                                2.5
+                            ]
+                        }
+                    }
+                }
+            ],
+            "visualization": "Bar Chart",
+            "frameworks": [],
+            "content": [
+                "Recent comparable transactions indicate a strong market for SaaS IPOs, with valuations reflecting growth potential.",
+                "The average EV/Revenue multiple for high-growth SaaS companies is significantly higher than the industry average, suggesting TechNova could command a premium.",
+                "Client's projected revenue growth (CAGR of 28%) positions it favorably for an IPO or acquisition."
+            ],
+            "takeaway": "TechNova's valuation can be optimized through strategic timing and choice of funding mechanism.",
+            "call_to_action": "Consider positioning for an IPO within the next 18 months to maximize valuation.",
+            "executive_summary": "TechNova's valuation is strong, supported by industry comparables and growth metrics. Strategic options include IPO or acquisition.",
+            "detailed_analysis": "Analysis of recent transactions and market multiples indicates a favorable environment for TechNova's growth capital raise or IPO.",
+            "methodology": "Data collected from market reports and financial analyses of comparable SaaS companies.",
+            "data": [
+                {
+                    "source": "PitchBook, SaaS Valuation Trends 2023"
+                },
+                {
+                    "source": "CB Insights, SaaS Market Analysis 2023"
+                }
+            ],
+            "framework_data": {}
         },
         {
-          "label": "Region B",
-          "value": 95
-        },
-        {
-          "label": "Region C",
-          "value": 140
-        },
-        {
-          "label": "Region D",
-          "value": 110
+            "slide_number": 2,
+            "title": "Options Assessment",
+            "slide_archetype": "Comparison",
+            "layout": {
+                "rows": 2,
+                "columns": 2
+            },
+            "sections": [
+                {
+                    "row": 1,
+                    "col": 1,
+                    "title": "Funding Options",
+                    "content": "1. Series D funding: Quick capital raise, less dilution.\n2. IPO: Higher valuation, market visibility.\n3. Acquisition: Immediate liquidity, strategic fit.",
+                    "charts": [
+                        "Decision Matrix (Weighted Scoring)"
+                    ],
+                    "frameworks": [
+                        "SWOT Analysis"
+                    ],
+                    "framework_data": [
+                        {
+                            "SWOT Analysis": {
+                                "Strengths": [
+                                    "Quick capital raise with Series D funding",
+                                    "Less dilution of ownership",
+                                    "Higher valuation and market visibility with IPO",
+                                    "Immediate liquidity through acquisition",
+                                    "Strategic fit with acquisition"
+                                ],
+                                "Weaknesses": [
+                                    "Potential pressure to perform quickly with Series D funding",
+                                    "High costs and regulatory requirements for IPO",
+                                    "Risk of losing control in acquisition",
+                                    null,
+                                    null
+                                ],
+                                "Opportunities": [
+                                    "Access to new investors through Series D funding",
+                                    "Increased brand recognition from IPO",
+                                    "Expansion opportunities through strategic acquisitions",
+                                    null,
+                                    null
+                                ],
+                                "Threats": [
+                                    "Market volatility affecting IPO success",
+                                    "Competitive landscape may impact acquisition negotiations",
+                                    "Dilution of brand value if acquisition is not well-received",
+                                    null,
+                                    null
+                                ]
+                            }
+                        }
+                    ],
+                    "infographics": [],
+                    "chart_data": {
+                        "Decision Matrix (Weighted Scoring)": {
+                            "xAxisTitle": "Funding Options",
+                            "yAxisTitle": "EV/Revenue Multiple",
+                            "legend": "Valuation Metrics",
+                            "inferences": [
+                                "Series D funding has the highest EV/Revenue multiple indicating strong investor interest.",
+                                "IPO provides significant market visibility but comes with a valuation discount.",
+                                "Acquisition offers immediate liquidity but at a lower multiple compared to other options."
+                            ],
+                            "labels": [],
+                            "values": []
+                        }
+                    }
+                },
+                {
+                    "row": 1,
+                    "col": 2,
+                    "title": "Pros and Cons",
+                    "content": "Pros: \n- Series D: Faster access to funds.\n- IPO: Potential for high valuation.\n- Acquisition: Immediate exit.\nCons:\n- Series D: More investor scrutiny.\n- IPO: Market volatility risk.\n- Acquisition: Loss of control.",
+                    "charts": [
+                        "Matrix Chart"
+                    ],
+                    "frameworks": [],
+                    "framework_data": [],
+                    "infographics": [],
+                    "chart_data": {
+                        "Matrix Chart": {
+                            "xAxisTitle": "Options",
+                            "yAxisTitle": "Count",
+                            "legend": "Pros and Cons",
+                            "inferences": [
+                                "IPO has the highest potential for valuation but comes with significant market risks.",
+                                "Series D offers faster access to funds but increases scrutiny from investors.",
+                                "Acquisition provides an immediate exit but results in loss of control."
+                            ],
+                            "labels": [],
+                            "values": []
+                        }
+                    }
+                },
+                {
+                    "row": 2,
+                    "col": 1,
+                    "title": "Financial Implications",
+                    "content": "Projected revenue growth post-funding: Series D: $540M; IPO: $710M; Acquisition: $930M.",
+                    "charts": [
+                        "Line Chart"
+                    ],
+                    "frameworks": [],
+                    "framework_data": [],
+                    "infographics": [],
+                    "chart_data": {
+                        "Line Chart": {
+                            "xAxisTitle": "Funding Options",
+                            "yAxisTitle": "Projected Revenue Growth ($M)",
+                            "legend": "Projected Revenue Growth Post-Funding",
+                            "inferences": [
+                                "Acquisition offers the highest projected revenue growth.",
+                                "IPO provides a significant revenue increase compared to Series D.",
+                                "Series D funding shows a solid growth trajectory but is the lowest among options."
+                            ],
+                            "labels": [
+                                "Series D",
+                                "IPO",
+                                "Acquisition"
+                            ],
+                            "values": [
+                                540,
+                                710,
+                                930
+                            ]
+                        }
+                    }
+                },
+                {
+                    "row": 2,
+                    "col": 2,
+                    "title": "Market Positioning",
+                    "content": "Evaluate market conditions and investor sentiment to determine optimal timing for IPO or acquisition.",
+                    "charts": [
+                        "Heatmap"
+                    ],
+                    "frameworks": [
+                        "Porter's Five Forces"
+                    ],
+                    "framework_data": [
+                        {
+                            "Porter's Five Forces": {
+                                "Competitive Rivalry": [
+                                    "High competition among existing players",
+                                    "Market saturation leading to price wars",
+                                    "Innovation as a key differentiator"
+                                ],
+                                "Supplier Power": [
+                                    "Limited number of suppliers for critical components",
+                                    "Suppliers hold significant bargaining power",
+                                    "Potential for vertical integration"
+                                ],
+                                "Buyer Power": [
+                                    "Increasing buyer awareness and price sensitivity",
+                                    "Availability of alternative products",
+                                    "Buyers can easily switch to competitors"
+                                ],
+                                "Threat of Substitution": [
+                                    "Emergence of new technologies offering similar solutions",
+                                    "Changing consumer preferences towards alternative products",
+                                    "Low switching costs for consumers"
+                                ],
+                                "Threat of New Entry": [
+                                    "Barriers to entry are moderate, allowing new competitors",
+                                    "Potential for new entrants to disrupt the market",
+                                    "Established brands have strong customer loyalty"
+                                ]
+                            }
+                        }
+                    ],
+                    "infographics": [],
+                    "chart_data": {
+                        "Heatmap": {
+                            "xAxisTitle": "Years",
+                            "yAxisTitle": "Revenue ($M)",
+                            "legend": "Projected Revenue Growth",
+                            "inferences": [
+                                "Revenue is expected to grow significantly over the next three years.",
+                                "EBITDA margin is improving, indicating better profitability."
+                            ],
+                            "labels": [],
+                            "values": []
+                        }
+                    }
+                }
+            ],
+            "visualization": "Decision Matrix",
+            "frameworks": [
+                "SWOT Analysis",
+                "Porter's Five Forces"
+            ],
+            "content": [
+                "Each funding option presents unique advantages and challenges that must be carefully weighed.",
+                "Financial projections indicate significant revenue growth potential, particularly with an IPO.",
+                "Market conditions favor a strategic approach to funding, with investor sentiment leaning towards high-growth SaaS companies."
+            ],
+            "takeaway": "A thorough assessment of funding options reveals that an IPO may yield the highest valuation, but each option has strategic merits.",
+            "call_to_action": "Engage stakeholders to discuss the preferred funding strategy moving forward.",
+            "executive_summary": "TechNova has three viable options for growth capital: Series D funding, IPO, or acquisition. Each option has distinct financial implications and market positioning considerations.",
+            "detailed_analysis": "The analysis compares the pros and cons of each funding option, supported by financial projections and market conditions.",
+            "methodology": "Data sourced from financial forecasts and market analysis reports, with a comparative analysis framework applied.",
+            "data": [
+                {
+                    "source": "MarketWatch, SaaS Funding Trends 2023"
+                },
+                {
+                    "source": "Forbes, IPO Market Analysis 2023"
+                }
+            ],
+            "framework_data": {}
         }
-      ],
-      "framework_data": {
-        "SWOT Analysis": {
-          "Strengths": [
-            "High product quality",
-            null
-          ],
-          "Weaknesses": [
-            "Limited digital engagement",
-            null
-          ],
-          "Opportunities": [
-            "Leveraging technology for personalization",
-            "Enhancing customer engagement"
-          ],
-          "Threats": [
-            "High competitive rivalry",
-            "Bargaining power of customers"
-          ]
-        }
-      },
-      "chart_data": {
-        "xAxisTitle": "Fiscal Year",
-        "yAxisTitle": "Financial Metrics ($M)",
-        "legend": "Financial Overview",
-        "inferences": [
-          "Revenue is projected to decrease from $4.2M to $4.0M in the next fiscal year.",
-          "Customer Lifetime Value (CLV) is expected to decline from $450 to $400.",
-          "Cost of Goods Sold (COGS) is projected to decrease slightly from $1.8M to $1.75M.",
-          "Marketing & G&A expenses are expected to remain stable at $0.8M."
-        ]
-      }
-    }
-  ],
-  "recommendations": [
-    "Invest in technology to enhance data-driven personalization.",
-    "Create engaging content and community initiatives to foster customer loyalty.",
-    "Reevaluate marketing strategies to optimize customer acquisition costs.",
-    "Implement a customer feedback loop to continuously improve offerings."
-  ],
-  "problem_statement": "The Daily Grind\" is a beloved, ten-year-old coffee subscription service. For years, its business model was simple and successful: a monthly delivery of high-quality, whole-bean coffee from a curated selection of roasters. The company built a loyal customer base of coffee enthusiasts who valued quality and convenience.\nHowever, the market has become fiercely competitive. The rise of a new wave of direct-to-consumer (D2C) coffee brands has fragmented the market. These new players are not just selling beans; they are building vibrant online communities, leveraging influencer partnerships, and offering a highly personalized subscription experience (e.g., custom flavor profiles, AI-driven recommendations, single-origin drops). As a result, The Daily Grind has seen its new customer acquisition slow to a trickle, while a significant portion of its existing customer base is showing signs of churn.\n2. The Core Problem\nThe Daily Grind is at a critical crossroads. Its brand, once a market leader, is now perceived as a \"basic\" and somewhat impersonal service in a market that craves unique experiences and a sense of community. Its digital presence is functional but not engaging, and it lacks the data-driven personalization that its competitors are using to build lasting relationships with customers.\nYour task is to develop a comprehensive strategy to revitalize The Daily Grind and secure its future in a crowded and dynamic market.\n\nThis table provides a basic financial overview.\nMetric\tLast Fiscal Year\tProjections (Next Year)\nRevenue\t$4.2M\t$4.0M\nCustomer Lifetime Value (CLV)\t$450\t$400 (Projected)\nCost of Goods Sold (COGS)\t$1.8M\t$1.75M\nMarketing & G&A\t$0.8M\t$0.8M"
-};
+    ],
+    "recommendations": [
+        "Pursue an IPO within 18 months to maximize valuation based on current market conditions.",
+        "Consider Series D funding as a backup option to maintain flexibility in capital raising.",
+        "Evaluate acquisition offers carefully to ensure alignment with long-term strategic goals."
+    ],
+    "problem_statement": "You are part of the Investment Banking division at a global firm.\nYour client is TechNova Ltd., a mid-sized SaaS company operating in enterprise cloud solutions. They are seeking advice on strategic options:\n\nRaise growth capital via private placement (Series D round)\n\nPursue an IPO in the next 18 months\n\nExplore acquisition by a larger tech player\n\nYour task is to evaluate these options and recommend the best path forward.\n\nCompany Profile\n\nRevenue (FY 2024): $420M\n\nRevenue Growth (3yr CAGR): 28%\n\nEBITDA Margin: 18%\n\nNet Debt: $120M\n\nCash Balance: $60M\n\nHeadcount: 2,100\n\nMarket Data\n\nSaaS industry average EV/Revenue multiple: 6.5x\n\nHigh-growth SaaS (>25% CAGR) EV/Revenue multiple: 8–10x\n\nMedian IPO size (recent SaaS IPOs): $250M\n\nAvg IPO valuation discount (vs. private placement): 15–20%\n\nRecent Comparable Transactions\nCompany\tDeal Type\tValuation ($B)\tEV/Revenue Multiple\tNotes\nCloudEdge Inc.\tIPO (2024)\t3.2\t8.5x\tRaised $300M, priced at upper range\nDataSphere Co.\tAcquisition\t2.8\t7.0x\tBought by Oracle for strategic fit\nFinOps Ltd.\tSeries D\t1.5\t9.0x\tRaised $200M from PE investor\nAppStream AG\tIPO (2023)\t2.0\t6.8x\tPriced below expectations, post-drop -18%\nClient’s Financial Projections\nMetric\tFY 2025E\tFY 2026E\tFY 2027E\nRevenue ($M)\t540\t710\t930\nEBITDA Margin (%)\t19%\t21%\t23%\nNet Income ($M)\t55\t92\t140"
+}
+;
 
 
 // AuthProvider wraps the app and provides auth state
@@ -150,6 +463,7 @@ function App() {
   const [useMockData, setUseMockData] = useState(false);
   const [userName, setUserName] = useState("User");
   const [userCoins, setUserCoins] = useState(0);
+  const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const navigate = useNavigate();
   const { isAuthenticated, setIsAuthenticated, token, setToken } = useContext(AuthContext);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
@@ -160,7 +474,7 @@ function App() {
     const fetchUserName = async () => {
       
         try {
-          const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/auth/user`, {
+          const response = await fetch(`${API_BASE_URL}/auth/user`, {
             method: "GET",
             headers: {
               Authorization: `Bearer ${token}`,
@@ -231,7 +545,7 @@ function App() {
         setSlides(result.slides);
         setOptimizedStoryline(result.optimized_storyline || []);
         // Consume a coin after successful slide generation
-        const consumeRes = await fetch(`${process.env.REACT_APP_API_BASE_URL}/auth/consume_coin`, {
+  const consumeRes = await fetch(`${API_BASE_URL}/auth/consume_coin`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -434,6 +748,15 @@ function App() {
                     <div className="flex items-center justify-between mb-6">
                       <h2 className="text-2xl font-semibold text-gray-900">Generated Slides</h2>
                       <div className="flex items-center gap-2">
+                        {/* <button
+                          onClick={() => {
+                            setSlides(mockResponse.slides);
+                            setOptimizedStoryline(mockResponse.optimized_storyline);
+                          }}
+                          className="px-3 py-1 border rounded text-sm bg-blue-600 text-white hover:bg-blue-700"
+                        >
+                          Generate Mock Slides
+                        </button> */}
                         <button
                           onClick={() => setZoom(z => Math.max(0.5, +(z - 0.1).toFixed(2)))}
                           className="px-3 py-1 border rounded text-sm"
@@ -457,7 +780,37 @@ function App() {
                         </button>
                       </div>
                     </div>
-                    <SlidePreview slides={slides} isLoading={isLoading} zoom={zoom} optimizedStoryline={optimizedStoryline} />
+                    {/* <SlidePreview
+                      slides={slides}
+                      isLoading={isLoading}
+                      zoom={zoom}
+                      optimizedStoryline={optimizedStoryline}
+                      useMockData={useMockData}
+                      setUseMockData={setUseMockData}
+                      currentSlideIndex={currentSlideIndex}
+                      setCurrentSlideIndex={setCurrentSlideIndex}
+                      onGenerateMockSlides={() => {
+                        setUseMockData(true);
+                        setSlides(mockResponse.slides);
+                        setOptimizedStoryline(mockResponse.optimized_storyline);
+                      }}
+                    /> */}
+                    {/* Canvas Slide Preview */}
+                    <div className="mt-6">
+                      <h3 className="text-xl font-semibold text-gray-900 mb-4">Interactive Slide Canvas</h3>
+                      <CanvasSlidePreview 
+                      slides={slides} 
+                      zoom={zoom} 
+                      currentSlideIndex={currentSlideIndex} 
+                      setCurrentSlideIndex={setCurrentSlideIndex} 
+                      optimizedStoryline={optimizedStoryline}
+                      onGenerateMockSlides={() => {
+                        setUseMockData(true);
+                        setSlides(mockResponse.slides);
+                        setOptimizedStoryline(mockResponse.optimized_storyline);
+                      }}
+                      />
+                    </div>
                   </div>
                 </div>
               </ProtectedRoute>

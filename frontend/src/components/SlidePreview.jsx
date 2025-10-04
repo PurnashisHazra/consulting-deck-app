@@ -2,7 +2,7 @@ import { useState } from "react";
 import FrameworkDiagram from "./FrameworkDiagram";
 import ChartRenderer from "./ChartRenderer";
 
-export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedStoryline }) {
+export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedStoryline, useMockData, setUseMockData, onGenerateMockSlides }) {
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
 
   if (isLoading) {
@@ -24,6 +24,15 @@ export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedSto
         </div>
         <h3 className="text-lg font-medium text-gray-900 mb-2">No slides yet</h3>
         <p className="text-gray-500">Fill out the form and click "Generate Slides" to create your presentation</p>
+        <button
+          className="mt-6 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+          onClick={() => {
+            setUseMockData(true);
+            if (onGenerateMockSlides) onGenerateMockSlides();
+          }}
+        >
+          Generate Mock Slides
+        </button>
       </div>
     );
   }

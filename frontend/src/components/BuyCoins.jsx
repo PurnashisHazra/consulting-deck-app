@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../api';
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast, { Toaster } from 'react-hot-toast';
@@ -17,7 +18,7 @@ const BuyCoins = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      await fetch(`${process.env.REACT_APP_API_BASE_URL}/auth/buy_coins`, {
+  await fetch(`${API_BASE_URL}/auth/buy_coins`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),

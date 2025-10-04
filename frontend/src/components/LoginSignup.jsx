@@ -1,5 +1,6 @@
 import React, { useState, useContext } from 'react';
 import axios from 'axios';
+import { API_BASE_URL } from '../api';
 import { useNavigate } from 'react-router-dom';
 import { AuthContext } from '../App';
 
@@ -16,7 +17,7 @@ const LoginSignup = () => {
     const endpoint = isLogin ? '/auth/login' : '/auth/signup';
     setIsLoading(true);
     try {
-      const response = await axios.post(`${process.env.REACT_APP_API_BASE_URL}${endpoint}`, {
+  const response = await axios.post(`${API_BASE_URL}${endpoint}`, {
         email,
         password,
       });

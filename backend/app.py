@@ -9,6 +9,7 @@ import base64
 from io import BytesIO
 from charts_repo import CHART_REPO
 from frameworks_repo import DATA_FRAMEWORKS
+from layout_repo import SLIDE_REPO
 from json_repair import repair_json
 from auth import router as auth_router
 from fastapi import Header, HTTPException
@@ -17,6 +18,7 @@ import os
 import pandas as pd
 import math
 import json
+from infographics_repo import INFOGRAPHIC_REPO
 
 load_dotenv()
 def clean_numbers(obj):
@@ -112,6 +114,7 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
     repos_context = {
         "CHART_REPO": CHART_REPO,
         "DATA_FRAMEWORKS": DATA_FRAMEWORKS,
+        "SLIDE_REPO": SLIDE_REPO,
     }
     payload = {
         "problem_statement": problem_statement,
@@ -121,10 +124,20 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
         "repos": repos_context,
     }
     system_instructions = (
-        "You are a veteran McKinsey/BCG partner. Build an executive-ready consulting deck with detailed, "
-        "comprehensive content. Expand the storyline into detailed, actionable insights. Use the provided "
-        "repos to choose frameworks and chart types. Be structured, comprehensive, and action-oriented. Get numerical statistics and data from legit sources if already not provided."
-        "Output strictly valid JSON matching the response schema."
+        "You are a veteran McKinsey/BCG partner and expert in consulting slide design. For each slide, provide: "
+        "1. Slide Archetype (e.g., Title-Content, Comparison, Timeline, Framework, Data Chart, etc.). "
+        "2. Select the recommended layout from SLIDE_REPO according to the slide archetype, if available. If not, suggest a layout inspired by BCG/McKinsey slide layouts. "
+        "3. For each grid section, specify: "
+        "   - title: Section title "
+        "   - content: Key points (minimize content) "
+        "   - charts: an array of chart types (from CHART_REPO) relevant for this section"
+        "   - frameworks: an array of frameworks (from DATA_FRAMEWORKS) relevant for this section"
+        "Study BCG and McKinsey slide design patterns and suggest layouts and content sections that maximize clarity and impact for each section of each slide. "
+        "Also, build an executive-ready consulting deck with detailed, comprehensive content. Expand the storyline into detailed, actionable insights. "
+        "Use the provided repos to choose frameworks and chart types."
+        "Be structured, comprehensive, and action-oriented."
+        "Get numerical statistics and data from legit sources."
+        "Mention sources. Output strictly valid JSON matching the response schema."
     )
     response_schema = {
         "type": "object",
@@ -138,6 +151,16 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
                     "properties": {
                         "slide_number": {"type": "number"},
                         "title": {"type": "string"},
+                        "slide_archetype": {"type": "string"},
+                        "layout": {"type": "object", "properties": {"rows": {"type": "number"}, "columns": {"type": "number"}}, "required": ["rows", "columns"]},
+                        "sections": {"type": "array", "items": {"type": "object", "properties": {
+                            "row": {"type": "number"},
+                            "col": {"type": "number"},
+                            "title": {"type": "string"},
+                            "content": {"type": "string"},
+                            "charts": {"type": "array", "items": {"type": "string"}},
+                            "frameworks": {"type": "array", "items": {"type": "string"}}
+                        }, "required": ["row", "col", "content"]}},
                         "visualization": {"type": "string"},
                         "frameworks": {"type": "array", "items": {"type": "string"}},
                         "content": {"type": "array", "items": {"type": "string"}},
@@ -149,7 +172,7 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
                         "data": {"type": "array"}
                     },
                     "required": [
-                        "slide_number","title","visualization","frameworks","content","takeaway"
+                        "slide_number","title","slide_archetype","layout","sections","visualization","frameworks","content","takeaway"
                     ]
                 }
             },
@@ -170,13 +193,17 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
     RESPONSE REQUIREMENTS:
     - Return only JSON that conforms to this schema:
     {json.dumps(response_schema, ensure_ascii=False)}
-    - visualization must be one of the chart names present in CHART_REPO and should be the most suitable one
+    - For each slide, provide slide_archetype, layout (rows/columns), and sections (row, col, content) as described above.
+    - chart must be one of the chart names present in CHART_REPO and should be the most suitable one
+    - If chart is specified, compulsorily give relevant data with sources.
+    - For forecasts, use realistic, justifiable numbers and give 5 year forecasts with CAGR and sources.
     - frameworks must be chosen from DATA_FRAMEWORKS names and should be the most suitable one
+    - Content should have relevant data points, numbers, and sources.
     - Ensure slides length == num_slides and include slide_number 1..N
-    - Create detailed, comprehensive content with 5-7 bullet points per slide
+    - Create detailed, comprehensive content with 3-4 bullet points per slide
     - Expand storyline into detailed, actionable insights
     - Include detailed_analysis and methodology fields for each slide
-    - Make content executive-ready with specific metrics and recommendations
+    - Make content executive-ready with specific numbers, metrics and recommendations
     """
 
     completion = client.chat.completions.create(
@@ -189,6 +216,7 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
     )
 
     content = completion.choices[0].message.content
+    print("------Raw LLM response:", content)
     try:
         result = json.loads(content)
     except Exception:
@@ -212,7 +240,7 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
             ],
             "recommendations": {}
         }
-    print("------Generated deck:", result)
+    #print("------Generated deck:", result)
     return result
 
 # --- Server-side Chart Rendering ---
@@ -299,163 +327,323 @@ async def generate_slides(request: SlideRequest, authorization: str = Header(Non
         if not s.get("data"):
             s["data"] = generate_dummy_data(s.get("visualization", "Bar Chart"), s.get("content", ""))
         s["framework_data"] = {}
-    # We have to limit number of frameworks to 1 per slide to avoid token limits
-        for fw in s.get("frameworks", []):
+        # Slide-level frameworks enrichment (existing logic)
+        # for fw in s.get("frameworks", []):
             # if c>=1:
             #     break
             # c+=1
 
-            fw_prompt = f"""
-            For the following framework, provide a JSON object with the relevant fields filled in for this slide context:
-            Framework: {fw}
-            Slide Title: {s.get('title')}
-            Slide Content: {s.get('content')}
-            If SWOT Analysis, return {{"Strengths": [...], "Weaknesses": [...], "Opportunities": [...], "Threats": [...]}}
-            If BCG Matrix, return {{"Stars": [...], "Cash Cows": [...], "Question Marks": [...], "Dogs": [...]}}
-            If Porter's Five Forces, return {{"Competitive Rivalry": [...], "Supplier Power": [...], "Buyer Power": [...], "Threat of Substitution": [...], "Threat of New Entry": [...]}}
-            If Value Chain Analysis, return {{"Primary Activities": [...], "Support Activities": [...]}}
-            If PEST Analysis, return {{"Political": [...], "Economic": [...], "Social": [...], "Technological": [...]}}
-            If Ansoff Matrix, return {{"Market Penetration": [...], "Market Development": [...], "Product Development": [...], "Diversification": [...]}}
-            If "McKinsey 7S", return {{"Strategy": [...], "Structure": [...], "Systems": [...], "Shared Values": [...], "Style": [...], "Staff": [...], "Skills": [...]}}            
-            If "Balanced Scorecard", return {{"Financial": [...], "Customer": [...], "Internal Processes": [...], "Learning & Growth": [...]}}
-            If "DuPont Analysis", return {{"ROE Decomposition": [...], "Financial Performance Analysis": [...]}}            
-            If "Economic Value Added (EVA)", return {{"Value Creation": [...], "Performance-Based Compensation": [...]}}            
-            If "Break-even Analysis", return {{"Profit Planning": [...], "Cost-Volume Analysis": [...]}}            
-            If "Sensitivity Analysis", return {{"Risk Assessment": [...], "Financial Forecasting": [...]}}            
-            If "Monte Carlo Simulation", return {{"Risk Modelling": [...], "Forecast Uncertainty": [...]}}            
-            If "Scenario Planning", return {{"Strategic Foresight": [...], "Long-Term Planning": [...]}}            
-            If "Cohort Analysis", return {{"Customer Retention": [...], "User Behavior Analysis": [...]}}            
-            If "Unit Economics Model", return {{"Startup Analysis": [...], "Scalability Assessment": [...]}}            
-            If "LTV:CAC Ratio", return {{"Customer Profitability": [...], "Marketing Efficiency": [...]}}            
-            If "CLV Forecasting Model", return {{"Customer Lifetime Value": [...], "Growth Modelling": [...]}}            
-            If "RACI Matrix", return {{"Role Clarity": [...], "Responsibility Assignment": [...]}}            
-            If "Organizational Structure Chart", return {{"Reporting Structure": [...], "Org Design": [...]}}            
-            If "Process Flow Diagram", return {{"Process Improvement": [...], "Efficiency Analysis": [...]}}            
-            If "SIPOC Diagram", return {{"Process Scoping": [...], "Quality Management": [...]}}            
-            If "Root Cause Analysis (5 Whys)", return {{"Problem Solving": [...], "Defect Reduction": [...]}}            
-            If "Fishbone Diagram", return {{"Root Cause Identification": [...], "Brainstorming": [...]}}            
-            If "Critical Path Method (CPM)", return {{"Project Scheduling": [...], "Bottleneck Detection": [...]}}            
-            If "PERT Chart", return {{"Project Estimation": [...], "Uncertainty Analysis": [...]}}            
-            If "Value Stream Mapping", return {{"Lean Improvement": [...], "Waste Reduction": [...]}}            
-            If "Theory of Constraints (TOC)", return {{"Throughput Improvement": [...], "Bottleneck Resolution": [...]}}            
-            If "Customer Journey Map", return {{"Experience Mapping": [...], "Pain Point Detection": [...]}}            
-            If "Empathy Map", return {{"User Needs Understanding": [...], "UX Design": [...]}}            
-            If "Kano Model", return {{"Feature Prioritization": [...], "Product Strategy": [...]}}            
-            If "Jobs-to-be-Done Framework", return {{"Innovation Discovery": [...], "Customer Motivation Analysis": [...]}}            
-            If "Product Life Cycle Curve", return {{"Product Strategy": [...], "Portfolio Planning": [...]}}            
-            If "Innovation Adoption Curve", return {{"Market Adoption": [...], "Product Launch Strategy": [...]}}            
-            If "AARRR Funnel", return {{"Startup Growth Tracking": [...], "User Lifecycle": [...]}}            
-            If "HEART Framework", return {{"UX Metrics": [...], "User Experience Tracking": [...]}}            
-            If "North Star Metric Framework", return {{"Product Focus": [...], "Growth Tracking": [...]}}            
-            If "OKR Framework", return {{"Goal Setting": [...], "Performance Tracking": [...]}}
-            For other frameworks, return a dictionary with relevant keys and values.
-            """
+            # fw_prompt = f"""
+            # For the following framework, provide a JSON object with the relevant fields filled in for this slide context:
+            # Framework: {fw}
+            # Slide Title: {s.get('title')}
+            # Slide Content: {s.get('content')}
+            # If SWOT Analysis, return {{"Strengths": [...], "Weaknesses": [...], "Opportunities": [...], "Threats": [...]}}
+            # If BCG Matrix, return {{"Stars": [...], "Cash Cows": [...], "Question Marks": [...], "Dogs": [...]}}
+            # If Porter's Five Forces, return {{"Competitive Rivalry": [...], "Supplier Power": [...], "Buyer Power": [...], "Threat of Substitution": [...], "Threat of New Entry": [...]}}
+            # If Value Chain Analysis, return {{"Primary Activities": [...], "Support Activities": [...]}}
+            # If PEST Analysis, return {{"Political": [...], "Economic": [...], "Social": [...], "Technological": [...]}}
+            # If Ansoff Matrix, return {{"Market Penetration": [...], "Market Development": [...], "Product Development": [...], "Diversification": [...]}}
+            # If "McKinsey 7S", return {{"Strategy": [...], "Structure": [...], "Systems": [...], "Shared Values": [...], "Style": [...], "Staff": [...], "Skills": [...]}}            
+            # If "Balanced Scorecard", return {{"Financial": [...], "Customer": [...], "Internal Processes": [...], "Learning & Growth": [...]}}
+            # If "DuPont Analysis", return {{"ROE Decomposition": [...], "Financial Performance Analysis": [...]}}            
+            # If "Economic Value Added (EVA)", return {{"Value Creation": [...], "Performance-Based Compensation": [...]}}            
+            # If "Break-even Analysis", return {{"Profit Planning": [...], "Cost-Volume Analysis": [...]}}            
+            # If "Sensitivity Analysis", return {{"Risk Assessment": [...], "Financial Forecasting": [...]}}            
+            # If "Monte Carlo Simulation", return {{"Risk Modelling": [...], "Forecast Uncertainty": [...]}}            
+            # If "Scenario Planning", return {{"Strategic Foresight": [...], "Long-Term Planning": [...]}}            
+            # If "Cohort Analysis", return {{"Customer Retention": [...], "User Behavior Analysis": [...]}}            
+            # If "Unit Economics Model", return {{"Startup Analysis": [...], "Scalability Assessment": [...]}}            
+            # If "LTV:CAC Ratio", return {{"Customer Profitability": [...], "Marketing Efficiency": [...]}}            
+            # If "CLV Forecasting Model", return {{"Customer Lifetime Value": [...], "Growth Modelling": [...]}}            
+            # If "RACI Matrix", return {{"Role Clarity": [...], "Responsibility Assignment": [...]}}            
+            # If "Organizational Structure Chart", return {{"Reporting Structure": [...], "Org Design": [...]}}            
+            # If "Process Flow Diagram", return {{"Process Improvement": [...], "Efficiency Analysis": [...]}}            
+            # If "SIPOC Diagram", return {{"Process Scoping": [...], "Quality Management": [...]}}            
+            # If "Root Cause Analysis (5 Whys)", return {{"Problem Solving": [...], "Defect Reduction": [...]}}            
+            # If "Fishbone Diagram", return {{"Root Cause Identification": [...], "Brainstorming": [...]}}            
+            # If "Critical Path Method (CPM)", return {{"Project Scheduling": [...], "Bottleneck Detection": [...]}}            
+            # If "PERT Chart", return {{"Project Estimation": [...], "Uncertainty Analysis": [...]}}            
+            # If "Value Stream Mapping", return {{"Lean Improvement": [...], "Waste Reduction": [...]}}            
+            # If "Theory of Constraints (TOC)", return {{"Throughput Improvement": [...], "Bottleneck Resolution": [...]}}            
+            # If "Customer Journey Map", return {{"Experience Mapping": [...], "Pain Point Detection": [...]}}            
+            # If "Empathy Map", return {{"User Needs Understanding": [...], "UX Design": [...]}}            
+            # If "Kano Model", return {{"Feature Prioritization": [...], "Product Strategy": [...]}}            
+            # If "Jobs-to-be-Done Framework", return {{"Innovation Discovery": [...], "Customer Motivation Analysis": [...]}}            
+            # If "Product Life Cycle Curve", return {{"Product Strategy": [...], "Portfolio Planning": [...]}}            
+            # If "Innovation Adoption Curve", return {{"Market Adoption": [...], "Product Launch Strategy": [...]}}            
+            # If "AARRR Funnel", return {{"Startup Growth Tracking": [...], "User Lifecycle": [...]}}            
+            # If "HEART Framework", return {{"UX Metrics": [...], "User Experience Tracking": [...]}}            
+            # If "North Star Metric Framework", return {{"Product Focus": [...], "Growth Tracking": [...]}}            
+            # If "OKR Framework", return {{"Goal Setting": [...], "Performance Tracking": [...]}}
+            # For other frameworks, return a dictionary with relevant keys and values.
+            # """
+            # try:
+            #     fw_completion = client.chat.completions.create(
+            #         model=MODEL_NAME,
+            #         messages=[
+            #             {"role": "system", "content": "You are a consulting frameworks expert. Return only valid JSON."},
+            #             {"role": "user", "content": fw_prompt},
+            #         ],
+            #         temperature=0.2,
+            #     )
+            #     fw_content = fw_completion.choices[0].message.content
+            #     fw_json = json.loads(fw_content)
+            #     try:
+            #         df = pd.DataFrame.from_dict(fw_json, orient='index').transpose()
+            #         s["framework_data"][fw] = df.to_dict(orient='list')
+            #     except Exception as e:
+            #         s["framework_data"][fw] = {"Error": [str(e)]}
+            # except Exception:
+        # Slide-level chart enrichment (existing logic)
+        # for chart in s.get("visualization", []):
+        #     # if chart_gen_num>=1:
+        #     #     break
+        #     print("Processing chart:", chart)
+        #     chart_prompt = f"""
+        #     For the following chart, provide a JSON object with the relevant fields filled in for this slide context:
+        #     Chart Type: {chart}
+        #     Slide Title: {s.get('title')}
+        #     Slide Content: {s.get('content')}
+        #     Data: {request.problem_statement}
+        #     Provide the following:
+        #     - xAxisTitle: A string representing the title of the X-axis.
+        #     - yAxisTitle: A string representing the title of the Y-axis.
+        #     - legend: A string representing the legend.
+        #     - inferences: A list of strings summarizing key insights from the chart data."""
+        #     try:
+        #         #chart_gen_num+=1
+        #         chart_completion = client.chat.completions.create(
+        #             model=MODEL_NAME,
+        #             messages=[
+        #                 {"role": "system", "content": "You are a data visualization expert. Return only valid JSON."},
+        #                 {"role": "user", "content": chart_prompt},
+        #             ],
+        #             temperature=0.3,
+        #         )
+        #         chart_content = chart_completion.choices[0].message.content
+        #         chart_content_repaired = repair_json(chart_content)
+        #         cleaned_json = clean_numbers(json.loads(chart_content_repaired))
+        #         chart_json = json.loads(cleaned_json)
+        #         s["chart_data"] = {
+        #             "xAxisTitle": chart_json.get("xAxisTitle", "Not available"),
+        #             "yAxisTitle": chart_json.get("yAxisTitle", "Not available"),
+        #             "legend": chart_json.get("legend", "Not available"),
+        #             "inferences": chart_json.get("inferences", []),
+        #         }
+        #     except Exception as e:
+        #         s["chart_data"] = {
+        #             "xAxisTitle": "Not available",
+        #             "yAxisTitle": "Not available",
+        #             "legend": "Not available",
+        #             "inferences": [],
+        #         }
+
+        # --- Section-level enrichment ---
+        for section in s.get("sections", []):
+            section["framework_data"] = []
+            # Infographic suggestion logic
+            section["infographics"] = []
+            section_content = section.get("content", "")
+            # Use OpenAI to suggest best infographics for the section
             try:
-                fw_completion = client.chat.completions.create(
+                infographics_prompt = f"""
+                Given the following section content, suggest the most relevant infographic types from this list:
+                {json.dumps([i['name'] for i in INFOGRAPHIC_REPO])}
+                Section Title: {section.get('title')}
+                Section Content: {section_content}
+                Only return a JSON array of infographic names that best visualize this section's information.
+                """
+                inf_completion = client.chat.completions.create(
                     model=MODEL_NAME,
                     messages=[
-                        {"role": "system", "content": "You are a consulting frameworks expert. Return only valid JSON."},
-                        {"role": "user", "content": fw_prompt},
+                        {"role": "system", "content": "You are a consulting infographics expert. Return only valid JSON."},
+                        {"role": "user", "content": infographics_prompt},
                     ],
                     temperature=0.2,
                 )
-                fw_content = fw_completion.choices[0].message.content
-                fw_json = json.loads(fw_content)
-
-                # Convert framework JSON to pandas DataFrame
-                try:
-                    df = pd.DataFrame.from_dict(fw_json, orient='index').transpose()
-                    s["framework_data"][fw] = df.to_dict(orient='list')
-                    print("Framework DataFrame:", s["framework_data"][fw])
-                except Exception as e:
-                    s["framework_data"][fw] = {"Error": [str(e)]}
+                inf_content = inf_completion.choices[0].message.content
+                section["infographics"] = json.loads(inf_content)
             except Exception:
-                s["framework_data"][fw] = {}
+                section["infographics"] = []
+            for fw in section.get("frameworks", []):
+                fw_prompt = f"""
+                For the following framework, provide a JSON object with the relevant fields filled in for this section context:
+                Framework: {fw}
+                Slide Title: {s.get('title')}
+                Section Title: {section.get('title')}
+                Section Content: {section.get('content')}
+                If SWOT Analysis, return {{"Strengths": [...], "Weaknesses": [...], "Opportunities": [...], "Threats": [...]}}
+                If BCG Matrix, return {{"Stars": [...], "Cash Cows": [...], "Question Marks": [...], "Dogs": [...]}}
+                If Porter's Five Forces, return {{"Competitive Rivalry": [...], "Supplier Power": [...], "Buyer Power": [...], "Threat of Substitution": [...], "Threat of New Entry": [...]}}
+                If Value Chain Analysis, return {{"Primary Activities": [...], "Support Activities": [...]}}
+                If PEST Analysis, return {{"Political": [...], "Economic": [...], "Social": [...], "Technological": [...]}}
+                If Ansoff Matrix, return {{"Market Penetration": [...], "Market Development": [...], "Product Development": [...], "Diversification": [...]}}
+                If "McKinsey 7S", return {{"Strategy": [...], "Structure": [...], "Systems": [...], "Shared Values": [...], "Style": [...], "Staff": [...], "Skills": [...]}}            
+                If "Balanced Scorecard", return {{"Financial": [...], "Customer": [...], "Internal Processes": [...], "Learning & Growth": [...]}}
+                If "DuPont Analysis", return {{"ROE Decomposition": [...], "Financial Performance Analysis": [...]}}            
+                If "Economic Value Added (EVA)", return {{"Value Creation": [...], "Performance-Based Compensation": [...]}}            
+                If "Break-even Analysis", return {{"Profit Planning": [...], "Cost-Volume Analysis": [...]}}            
+                If "Sensitivity Analysis", return {{"Risk Assessment": [...], "Financial Forecasting": [...]}}            
+                If "Monte Carlo Simulation", return {{"Risk Modelling": [...], "Forecast Uncertainty": [...]}}            
+                If "Scenario Planning", return {{"Strategic Foresight": [...], "Long-Term Planning": [...]}}            
+                If "Cohort Analysis", return {{"Customer Retention": [...], "User Behavior Analysis": [...]}}            
+                If "Unit Economics Model", return {{"Startup Analysis": [...], "Scalability Assessment": [...]}}            
+                If "LTV:CAC Ratio", return {{"Customer Profitability": [...], "Marketing Efficiency": [...]}}            
+                If "CLV Forecasting Model", return {{"Customer Lifetime Value": [...], "Growth Modelling": [...]}}            
+                If "RACI Matrix", return {{"Role Clarity": [...], "Responsibility Assignment": [...]}}            
+                If "Organizational Structure Chart", return {{"Reporting Structure": [...], "Org Design": [...]}}            
+                If "Process Flow Diagram", return {{"Process Improvement": [...], "Efficiency Analysis": [...]}}            
+                If "SIPOC Diagram", return {{"Process Scoping": [...], "Quality Management": [...]}}            
+                If "Root Cause Analysis (5 Whys)", return {{"Problem Solving": [...], "Defect Reduction": [...]}}            
+                If "Fishbone Diagram", return {{"Root Cause Identification": [...], "Brainstorming": [...]}}            
+                If "Critical Path Method (CPM)", return {{"Project Scheduling": [...], "Bottleneck Detection": [...]}}            
+                If "PERT Chart", return {{"Project Estimation": [...], "Uncertainty Analysis": [...]}}            
+                If "Value Stream Mapping", return {{"Lean Improvement": [...], "Waste Reduction": [...]}}            
+                If "Theory of Constraints (TOC)", return {{"Throughput Improvement": [...], "Bottleneck Resolution": [...]}}            
+                If "Customer Journey Map", return {{"Experience Mapping": [...], "Pain Point Detection": [...]}}            
+                If "Empathy Map", return {{"User Needs Understanding": [...], "UX Design": [...]}}            
+                If "Kano Model", return {{"Feature Prioritization": [...], "Product Strategy": [...]}}            
+                If "Jobs-to-be-Done Framework", return {{"Innovation Discovery": [...], "Customer Motivation Analysis": [...]}}            
+                If "Product Life Cycle Curve", return {{"Product Strategy": [...], "Portfolio Planning": [...]}}            
+                If "Innovation Adoption Curve", return {{"Market Adoption": [...], "Product Launch Strategy": [...]}}            
+                If "AARRR Funnel", return {{"Startup Growth Tracking": [...], "User Lifecycle": [...]}}            
+                If "HEART Framework", return {{"UX Metrics": [...], "User Experience Tracking": [...]}}            
+                If "North Star Metric Framework", return {{"Product Focus": [...], "Growth Tracking": [...]}}            
+                If "OKR Framework", return {{"Goal Setting": [...], "Performance Tracking": [...]}}
+                For other frameworks, return a dictionary with relevant keys and values.
+                """
+                try:
+                    fw_completion = client.chat.completions.create(
+                        model=MODEL_NAME,
+                        messages=[
+                            {"role": "system", "content": "You are a consulting frameworks expert. Return only valid JSON."},
+                            {"role": "user", "content": fw_prompt},
+                        ],
+                        temperature=0.2,
+                    )
+                    fw_content = fw_completion.choices[0].message.content
+                    fw_json = json.loads(fw_content)
+                    try:
+                        # If all values in fw_json are lists, treat as tabular
+                        if isinstance(fw_json, dict) and all(isinstance(v, list) for v in fw_json.values()):
+                            df = pd.DataFrame.from_dict(fw_json, orient='index').transpose()
+                            section["framework_data"].append({fw: df.to_dict(orient='list')})
+                        else:
+                            section["framework_data"].append({fw: fw_json})
+                    except Exception as e:
+                        section["framework_data"].append({fw: {"Error": [str(e)]}})
+                except Exception:
+                    section["framework_data"].append({fw: {}})
+            section["chart_data"] = {}
+            charts = section.get("charts", None)
+            chart = charts[0] if charts and len(charts) > 0 else None
+            if chart:
+                # chart_prompt = f"""
+                # For the following chart, provide a JSON object in table format for plotting, plus metadata, for this section context:
+                # Chart Type: {chart}
+                # Slide Title: {s.get('title')}
+                # Section Title: {section.get('title')}
+                # Section Content: {section.get('content')}
+                # Data: {request.problem_statement}
+                # For bar/line/area/pie/donut charts, return: {{"labels": [...], "values": [...]}}
+                # For waterfall charts, return: {{"steps": [...], "values": [...]}}
+                # For scatter/bubble charts, return: {{"x": [...], "y": [...], "z": [...] (optional)}}
+                # For radar charts, return: {{"labels": [...], "values": [...]}}
+                # For other chart types, return a dictionary with arrays for each axis/series.
+                # Additionally, necessarily provide:
+                # - xAxisTitle: A string representing the title of the X-axis.
+                # - yAxisTitle: A string representing the title of the Y-axis.
+                # - legend: A string representing the legend.
+                # - inferences: A list of strings summarizing key insights from the chart data.
+                # Return only valid JSON.
+                # """
+                chart_prompt = f"""
+                You are a data visualization assistant. Your task is to generate **strictly valid JSON** for plotting charts.
 
-        # try:
-        #     # Call the generate_chart_data function to get chart data
-        #     chart_data_response = await generate_chart_data(
-        #         visualization=s.get("visualization"),
-        #         data_points=s.get("data")
-        #     )
-        #     print("Chart data response:", chart_data_response)
-        #     s["chart_data"] = chart_data_response.get("data", [])
-        #     s["xAxisTitle"] = chart_data_response.get("xAxisTitle", "Not available")
-        #     s["yAxisTitle"] = chart_data_response.get("yAxisTitle", "Not available")
-        #     s["legend"] = chart_data_response.get("legend", "Not available")
-        #     s["inferences"] = chart_data_response.get("inferences", [])
-        #     s["relatedDataPoints"] = chart_data_response.get("relatedDataPoints", [])
-        # except Exception as e:
-        #     s["chart_data"] = {"error": str(e)}
-        #chart_gen_num =0
-        for chart in s.get("visualization", []):
-            # if chart_gen_num>=1:
-            #     break
-            print("Processing chart:", chart)
-            chart_prompt = f"""
-            For the following chart, provide a JSON object with the relevant fields filled in for this slide context:
-            Chart Type: {chart}
-            Slide Title: {s.get('title')}
-            Slide Content: {s.get('content')}
-            Data: {request.problem_statement}
-            Provide the following:
-            - xAxisTitle: A string representing the title of the X-axis.
-            - yAxisTitle: A string representing the title of the Y-axis.
-            - legend: A string representing the legend.
-            - inferences: A list of strings summarizing key insights from the chart data."""
-            try:
-                #chart_gen_num+=1
-                chart_completion = client.chat.completions.create(
-                    model=MODEL_NAME,
-                    messages=[
-                        {"role": "system", "content": "You are a data visualization expert. Return only valid JSON."},
-                        {"role": "user", "content": chart_prompt},
-                    ],
-                    temperature=0.3,
-                )
-                chart_content = chart_completion.choices[0].message.content
-                # chart_content = {
-                #                     "xAxisTitle": "Strategic Recommendations",
-                #                     "yAxisTitle": "Impact on Customer Engagement",
-                #                     "legend": "Recommendations Impact",
-                #                     "inferences": [
-                #                         "Implementing a personalized subscription model can significantly enhance customer retention.",
-                #                         "Community-building initiatives are essential for improving brand perception and customer loyalty.",
-                #                         "Limited-time offers can drive urgency and increase short-term sales.",
-                #                         "Leveraging customer feedback will help in tailoring products to meet evolving customer preferences.",
-                #                         "Partnerships with local roasters can diversify offerings and strengthen community ties."
-                #                     ]
-                #                 }
+                Context:
+                - Chart Type: {chart}
+                - Slide Title: {s.get('title')}
+                - Section Title: {section.get('title')}
+                - Slide Content: {section.get('content')}
+                - Problem Statement (use this for data extraction if possible): {request.problem_statement}
 
-                chart_content_repaired = repair_json(chart_content)
-                cleaned_json = clean_numbers(json.loads(chart_content_repaired))
-                print("--------------------------->Cleaned JSON:", cleaned_json)
-                chart_json = json.loads(cleaned_json)
+                Instructions:
+                1. Always extract or infer structured numeric data from the Problem Statement or Section Content.
+                - If no explicit numbers exist, invent a small but realistic dataset (3–6 entries).
+                - Ensure data matches the specified chart type.
 
-                # Sanitize chart JSON to remove out-of-range float values
-                # def sanitize_json(data):
-                #     if isinstance(data, dict):
-                #         return {k: sanitize_json(v) for k, v in data.items()}
-                #     elif isinstance(data, list):
-                #         return [sanitize_json(v) for v in data]
-                #     elif isinstance(data, float):
-                #         if data == float('inf') or data == float('-inf') or data != data:  # Check for Infinity, -Infinity, NaN
-                #             return None
-                #     return data
+                2. Output must be a **single JSON object** following the schema for the chart type:
+                - For Bar/Line/Area/Pie/Donut charts:
+                    {{
+                    "labels": [ "Label1", "Label2", ... ],
+                    "values": [ number, number, ... ]
+                    }}
+                - For Waterfall charts:
+                    {{
+                    "steps": [ "Step1", "Step2", ... ],
+                    "values": [ number, number, ... ]
+                    }}
+                - For Scatter/Bubble charts:
+                    {{
+                    "x": [ number, number, ... ],
+                    "y": [ number, number, ... ],
+                    "z": [ number, number, ... ]  # optional for bubble size
+                    }}
+                - For Radar charts:
+                    {{
+                    "labels": [ "Dimension1", "Dimension2", ... ],
+                    "values": [ number, number, ... ]
+                    }}
+                - For other chart types: 
+                    Provide a dictionary with arrays for each axis/series.
 
-                #chart_json = sanitize_json(chart_json)
-                print("--------------------------->Cleaned chart content:", chart_json)
+                3. Additionally include these **metadata fields** in the JSON:
+                - "xAxisTitle": string
+                - "yAxisTitle": string
+                - "legend": string
+                - "inferences": [ "Insight1", "Insight2", ... ]
 
-                s["chart_data"] = {
-                    "xAxisTitle": chart_json.get("xAxisTitle", "Not available"),
-                    "yAxisTitle": chart_json.get("yAxisTitle", "Not available"),
-                    "legend": chart_json.get("legend", "Not available"),
-                    "inferences": chart_json.get("inferences", []),
-                }
-                print("--------------------------->Chart Data:", s["chart_data"])
-
-            except Exception as e:
-                s["chart_data"] = {"error": str(e)}
+                4. Output Rules:
+                - Return only **one JSON object** with no explanations or extra text.
+                - Do not wrap JSON in code blocks.
+                - Ensure JSON is syntactically valid.
+                """
+                try:
+                    chart_completion = client.chat.completions.create(
+                        model=MODEL_NAME,
+                        messages=[
+                            {"role": "system", "content": "You are a data visualization expert. Return only valid JSON."},
+                            {"role": "user", "content": chart_prompt},
+                        ],
+                        temperature=0.3,
+                    )
+                    chart_content = chart_completion.choices[0].message.content
+                    print("------------Generated chart content:", chart_content)
+                    chart_content_repaired = repair_json(chart_content)
+                    print("------------Repaired chart content:", chart_content_repaired)
+                    cleaned_json = clean_numbers(json.loads(chart_content_repaired))
+                    print("------------Cleaned chart content:", cleaned_json)
+                    chart_json = cleaned_json
+                    print("------------Parsed chart JSON:", chart_json)
+                    # Generate chart image data URI
+                    print("------------Generated chart image URI:", chart_json.get("xAxisTitle", "Not available"))
+                    section["chart_data"][chart] = {
+                        "xAxisTitle": chart_json.get("xAxisTitle", "Not available"),
+                        "yAxisTitle": chart_json.get("yAxisTitle", "Not available"),
+                        "legend": chart_json.get("legend", "Not available"),
+                        "inferences": chart_json.get("inferences", []),
+                        "labels": chart_json.get("labels", []),
+                        "values": chart_json.get("values", []),
+                    }
+                    print("------------Final chart JSON:", section["chart_data"][chart])
+                except Exception as e:
+                    section["chart_data"][chart] = {
+                        "xAxisTitle": "Not available",
+                        "yAxisTitle": "Not available",
+                        "legend": "Not available",
+                        "inferences":[],
+                    }
        
     result["slides"] = slides[: request.num_slides]
     result.setdefault("problem_statement", request.problem_statement)

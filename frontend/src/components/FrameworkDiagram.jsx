@@ -50,9 +50,12 @@ export default function FrameworkDiagram({ framework, frameworkData }) {
         </ul>
       );
     } else if (val && typeof val === "object") {
+      const cleanVal = JSON.parse(
+        JSON.stringify(val, (key, value) => ((value === null || value === "null") ? "" : value))
+      );
       return (
         <pre className="whitespace-pre-wrap break-words text-xs bg-gray-50 p-1 rounded border">
-          {JSON.stringify(val, null, 2)}
+          {JSON.stringify(cleanVal, null, 2)}
         </pre>
       );
     } else {
@@ -62,7 +65,7 @@ export default function FrameworkDiagram({ framework, frameworkData }) {
 
   return (
     <div className="overflow-x-auto h-full flex items-center justify-center">
-      {frameworkData && Object.keys(frameworkData).length > 0 ? (
+      {(frameworkData && Object.keys(frameworkData).length > 0 )? (
         <table className="min-w-[200px] w-full border border-gray-300 rounded text-xs">
           <thead>
             <tr>
