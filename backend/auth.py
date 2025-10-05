@@ -1,7 +1,7 @@
 from fastapi import Body
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from passlib.context import CryptContext
+from passlib.hash import sha256_crypt
 import jwt as pyjwt
 from datetime import datetime, timedelta
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -9,8 +9,7 @@ from fastapi.security import OAuth2PasswordBearer
 
 router = APIRouter()
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 
 # JWT secret key
 SECRET_KEY = "your_secret_key"
@@ -40,10 +39,10 @@ class Token(BaseModel):
 # Utility functions
 
 def get_password_hash(password):
-    return pwd_context.hash(password)
+    return sha256_crypt.hash(password)
 
 def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+    return sha256_crypt.verify(plain_password, hashed_password)
 
 def create_access_token(data: dict):
     to_encode = data.copy()

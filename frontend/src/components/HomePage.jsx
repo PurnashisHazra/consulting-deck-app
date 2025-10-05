@@ -9,7 +9,7 @@ const HomePage = () => {
           <h1 className="text-2xl font-bold text-gray-800">Made For Consultants</h1>
           <div className="space-x-6">
             <a href="/pricing" className="text-gray-600 hover:text-gray-800">Pricing</a>
-            <a href="#demo" className="text-gray-600 hover:text-gray-800">Demo</a>
+            <a href="https://www.youtube.com/shorts/DM6eYGqbEeg" className="text-gray-600 hover:text-gray-800">Demo</a>
           </div>
         </div>
       </nav>
