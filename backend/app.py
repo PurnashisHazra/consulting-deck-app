@@ -16,6 +16,9 @@ from fastapi import Header, HTTPException
 
 import os
 import pandas as pd
+import datetime
+from bson import ObjectId
+import numpy as np
 import math
 import json
 from infographics_repo import INFOGRAPHIC_REPO
@@ -29,13 +32,37 @@ def clean_numbers(obj):
     if isinstance(obj, list):
         return [clean_numbers(x) for x in obj]
     return obj
-client = OpenAI(api_key=os.getenv('OPEN_AI_API'))
+
+def sanitize_for_json(obj):
+    """Recursively convert common non-JSON-serializable objects to JSON-safe types."""
+    # ObjectId
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    # pandas Timestamp
+    if isinstance(obj, pd.Timestamp):
+        return obj.isoformat()
+    # datetime
+    if isinstance(obj, datetime.datetime):
+        return obj.isoformat()
+    # numpy types
+    if isinstance(obj, (np.integer, np.floating)):
+        return obj.item()
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, dict):
+        return {k: sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [sanitize_for_json(x) for x in obj]
+    return obj
+# OpenAI client
+openai_client = OpenAI(api_key=os.getenv('OPEN_AI_API'))
 #print(os.getenv('OPEN_AI_API'))
 # Prefer a lightweight, widely available default model; override via OPENAI_MODEL
 MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 from contextlib import asynccontextmanager
 from auth import users_collection
+from motor.motor_asyncio import AsyncIOMotorClient
 
 @asynccontextmanager
 async def lifespan(app):
@@ -43,6 +70,12 @@ async def lifespan(app):
     yield
 
 app = FastAPI(title="Smart Consulting Deck Generator", lifespan=lifespan)
+
+# MongoDB decks collection
+MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://lobrockyl:Moyyn123@consultdg.ocafbf0.mongodb.net/?retryWrites=true&w=majority&appName=ConsultDG")
+client = AsyncIOMotorClient(MONGO_URI)
+db = client.get_database("consulting_deck")
+decks_collection = db.get_collection("decks")
 
 # --- CORS ---
 app.add_middleware(
@@ -132,7 +165,7 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
         "repos": repos_context,
     }
     system_instructions = (
-        "You are a veteran McKinsey/BCG partner and expert in consulting slide design. For each slide, provide: "
+        "You are a veteran McKinsey/BCG partner and expert in consulting slide design, . For each slide, provide: "
         "1. Slide Archetype (e.g., Title-Content, Comparison, Timeline, Framework, Data Chart, etc.). "
         "2. Select the recommended layout from SLIDE_REPO according to the slide archetype, if available. If not, suggest a layout inspired by BCG/McKinsey slide layouts. "
         "3. For each grid section, specify: "
@@ -214,7 +247,7 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
     - Make content executive-ready with specific numbers, metrics and recommendations
     """
 
-    completion = client.chat.completions.create(
+    completion = openai_client.chat.completions.create(
         model=MODEL_NAME,
         messages=[
             {"role": "system", "content": system_instructions},
@@ -335,6 +368,122 @@ async def generate_slides(request: SlideRequest, authorization: str = Header(Non
         if not s.get("data"):
             s["data"] = generate_dummy_data(s.get("visualization", "Bar Chart"), s.get("content", ""))
         s["framework_data"] = {}
+        # Ensure layout exists
+        layout = s.get("layout") or {"rows": 1, "columns": 1}
+        rows = int(layout.get("rows", 1) or 1)
+        cols = int(layout.get("columns", 1) or 1)
+        slots = max(1, rows * cols)
+
+        # Normalize sections and ensure they are not empty
+        existing_sections = s.get("sections", []) or []
+        # Build a map of (row,col) -> section for positioning if present
+        slot_map = {}
+        valid_sections = []
+        for sec in existing_sections:
+            # Use provided row/col or assign sequentially later
+            r = int(sec.get("row", 0) or 0)
+            ccol = int(sec.get("col", 0) or 0)
+            # Clean up content
+            content = sec.get("content")
+            if isinstance(content, str) and content.strip() == "":
+                content = None
+            if content is None and not sec.get("charts") and not sec.get("frameworks"):
+                # mark as empty for now; will be filled later
+                sec["_empty"] = True
+            else:
+                sec.pop("_empty", None)
+            key = (r, ccol) if r and ccol else None
+            if key:
+                slot_map[key] = sec
+            else:
+                valid_sections.append(sec)
+
+        # Rebuild ordered sections grid-wise, filling missing slots
+        new_sections = []
+        fallback_texts = []
+        # Prepare fallback texts from slide content or takeaway
+        if isinstance(s.get("content"), list) and len(s.get("content")) > 0:
+            fallback_texts = s.get("content")[:]
+        elif isinstance(s.get("content"), str) and s.get("content").strip():
+            fallback_texts = [s.get("content")]
+        if s.get("takeaway"):
+            fallback_texts.append(s.get("takeaway"))
+
+        # Also use labels from dummy data to craft short content
+        dummy_for_slide = s.get("data") or generate_dummy_data(s.get("visualization", "Bar Chart"), s.get("content", ""))
+        if isinstance(dummy_for_slide, list):
+            for d in dummy_for_slide:
+                label = d.get("label") if isinstance(d, dict) else None
+                if label:
+                    fallback_texts.append(f"Data point: {label}")
+
+        idx_fallback = 0
+        # Fill grid slots in row-major order
+        for r in range(1, rows + 1):
+            for ccol in range(1, cols + 1):
+                if (r, ccol) in slot_map:
+                    sec = slot_map[(r, ccol)]
+                    # If marked empty, try to fill from fallback
+                    if sec.get("_empty"):
+                        text = None
+                        if idx_fallback < len(fallback_texts):
+                            text = fallback_texts[idx_fallback]
+                            idx_fallback += 1
+                        else:
+                            # try to craft from visualization labels/values
+                            if isinstance(dummy_for_slide, list) and len(dummy_for_slide) > 0:
+                                dd = dummy_for_slide[(r - 1) % len(dummy_for_slide)]
+                                text = dd.get("label") if isinstance(dd, dict) else str(dd)
+                            else:
+                                text = "No content available."
+                        sec["content"] = text
+                        sec.pop("_empty", None)
+                    new_sections.append(sec)
+                else:
+                    # create a filler section
+                    text = None
+                    if idx_fallback < len(fallback_texts):
+                        text = fallback_texts[idx_fallback]
+                        idx_fallback += 1
+                    else:
+                        # derive from dummy data
+                        if isinstance(dummy_for_slide, list) and len(dummy_for_slide) > 0:
+                            dd = dummy_for_slide[(len(new_sections)) % len(dummy_for_slide)]
+                            text = dd.get("label") if isinstance(dd, dict) else str(dd)
+                        else:
+                            text = "No content available."
+                    new_sections.append({
+                        "row": r,
+                        "col": ccol,
+                        "title": f"{s.get('title', 'Section')} - {r},{ccol}",
+                        "content": text,
+                        "charts": [],
+                        "frameworks": [],
+                        "infographics": [],
+                    })
+
+        # If there were extra standalone valid_sections (without row/col), append them until slots
+        for sec in valid_sections:
+            if len(new_sections) >= slots:
+                break
+            # find first empty position index
+            # replace the next new_sections slot if it's filler
+            replaced = False
+            for idx_ns in range(len(new_sections)):
+                ns = new_sections[idx_ns]
+                if not ns.get("charts") and not ns.get("frameworks") and (not ns.get("content") or str(ns.get("content")).strip() == ""):
+                    new_sections[idx_ns] = sec
+                    replaced = True
+                    break
+            if not replaced and len(new_sections) < slots:
+                new_sections.append(sec)
+
+        # Truncate extras if more sections than slots
+        if len(new_sections) > slots:
+            new_sections = new_sections[:slots]
+
+        # Assign back
+        s["sections"] = new_sections
         # Slide-level frameworks enrichment (existing logic)
         # for fw in s.get("frameworks", []):
             # if c>=1:
@@ -387,7 +536,7 @@ async def generate_slides(request: SlideRequest, authorization: str = Header(Non
             # For other frameworks, return a dictionary with relevant keys and values.
             # """
             # try:
-            #     fw_completion = client.chat.completions.create(
+            #     fw_completion = openai_client.chat.completions.create(
             #         model=MODEL_NAME,
             #         messages=[
             #             {"role": "system", "content": "You are a consulting frameworks expert. Return only valid JSON."},
@@ -421,7 +570,7 @@ async def generate_slides(request: SlideRequest, authorization: str = Header(Non
         #     - inferences: A list of strings summarizing key insights from the chart data."""
         #     try:
         #         #chart_gen_num+=1
-        #         chart_completion = client.chat.completions.create(
+    #         chart_completion = openai_client.chat.completions.create(
         #             model=MODEL_NAME,
         #             messages=[
         #                 {"role": "system", "content": "You are a data visualization expert. Return only valid JSON."},
@@ -462,7 +611,7 @@ async def generate_slides(request: SlideRequest, authorization: str = Header(Non
                 Section Content: {section_content}
                 Only return a JSON array of infographic names that best visualize this section's information.
                 """
-                inf_completion = client.chat.completions.create(
+                inf_completion = openai_client.chat.completions.create(
                     model=MODEL_NAME,
                     messages=[
                         {"role": "system", "content": "You are a consulting infographics expert. Return only valid JSON."},
@@ -522,7 +671,7 @@ async def generate_slides(request: SlideRequest, authorization: str = Header(Non
                 For other frameworks, return a dictionary with relevant keys and values.
                 """
                 try:
-                    fw_completion = client.chat.completions.create(
+                    fw_completion = openai_client.chat.completions.create(
                         model=MODEL_NAME,
                         messages=[
                             {"role": "system", "content": "You are a consulting frameworks expert. Return only valid JSON."},
@@ -618,7 +767,7 @@ async def generate_slides(request: SlideRequest, authorization: str = Header(Non
                 - Ensure JSON is syntactically valid.
                 """
                 try:
-                    chart_completion = client.chat.completions.create(
+                    chart_completion = openai_client.chat.completions.create(
                         model=MODEL_NAME,
                         messages=[
                             {"role": "system", "content": "You are a data visualization expert. Return only valid JSON."},
@@ -656,7 +805,43 @@ async def generate_slides(request: SlideRequest, authorization: str = Header(Non
     result["slides"] = slides[: request.num_slides]
     result.setdefault("problem_statement", request.problem_statement)
     result.setdefault("optimized_storyline", result.get("optimized_storyline", request.storyline))
-    return result
+    # Save the generated deck into decks_collection and add a reference to user's saved_decks
+    try:
+        from auth import verify_access_token
+        payload = verify_access_token(token)
+        user_email = payload.get("sub")
+    except Exception:
+        user_email = None
+
+    deck_doc = {
+        "email": user_email,
+        "deck": result,
+        "num_slides": request.num_slides,
+        "created_at": pd.Timestamp.now().isoformat()
+    }
+    try:
+        await decks_collection.insert_one(deck_doc)
+        # Push a small summary into user's saved_decks array
+        summary = {
+            "title": result.get("slides", [{}])[0].get("title", "Untitled"),
+            "num_slides": request.num_slides,
+            "created_at": deck_doc["created_at"],
+            "deck_id": None
+        }
+        # find the inserted deck id and update summary
+        inserted = await decks_collection.find_one({"email": user_email, "created_at": deck_doc["created_at"]})
+        if inserted:
+            summary["deck_id"] = str(inserted.get("_id"))
+        if user_email:
+            await users_collection.update_one({"email": user_email}, {"$push": {"saved_decks": summary}})
+    except Exception as e:
+        print("Failed to save deck:", e)
+    # Sanitize result before returning to ensure JSON-safe
+    try:
+        safe_result = sanitize_for_json(result)
+    except Exception:
+        safe_result = result
+    return safe_result
 
 # --- API Call for Chart Plotting Data ---
 #@app.post("/generate_chart_data")
@@ -679,7 +864,7 @@ async def generate_chart_data(visualization: str, data_points: Optional[List[dic
         """
 
         try:
-            completion = client.chat.completions.create(
+            completion = openai_client.chat.completions.create(
                 model=MODEL_NAME,
                 messages=[
                     {"role": "system", "content": "You are a data visualization expert. Return only valid JSON."},
@@ -716,7 +901,7 @@ async def generate_chart_data(visualization: str, data_points: Optional[List[dic
     """
 
     try:
-        completion = client.chat.completions.create(
+        completion = openai_client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": "You are a data visualization expert. Return only valid JSON."},
@@ -737,5 +922,54 @@ async def generate_chart_data(visualization: str, data_points: Optional[List[dic
         }
     except Exception as e:
         return {"error": str(e)}
+
+@app.post("/save_deck")
+async def save_deck(deck: dict, authorization: str = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
+    token = authorization.split(" ")[1]
+    from auth import get_user
+    user_details = await get_user(token=token)
+    email = user_details.get("name")
+    if not email:
+        raise HTTPException(status_code=401, detail="User not found")
+    deck_doc = {
+        "email": user_details.get("email", email),
+        "deck": deck,
+        "created_at": pd.Timestamp.now().isoformat()
+    }
+    await decks_collection.insert_one(deck_doc)
+    return {"success": True}
+
+@app.get("/my_decks")
+async def my_decks(authorization: str = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
+    token = authorization.split(" ")[1]
+    from auth import get_user
+    user_details = await get_user(token=token)
+    email = user_details.get("name")
+    if not email:
+        raise HTTPException(status_code=401, detail="User not found")
+    decks = await decks_collection.find({"email": user_details.get("email", email)}).to_list(length=100)
+    # Convert ObjectId to string for JSON serialization
+    cleaned = []
+    for d in decks:
+        try:
+            item = dict(d)
+            if item.get("_id") is not None:
+                item["_id"] = str(item["_id"])
+            # ensure created_at is a string
+            if item.get("created_at") is not None:
+                try:
+                    # if it's a pandas Timestamp or datetime, convert to isoformat
+                    item["created_at"] = item["created_at"].isoformat() if hasattr(item["created_at"], 'isoformat') else str(item["created_at"])
+                except Exception:
+                    item["created_at"] = str(item.get("created_at"))
+            cleaned.append(item)
+        except Exception:
+            # fallback: stringify
+            cleaned.append({k: str(v) for k, v in (d.items() if isinstance(d, dict) else [])})
+    return {"decks": cleaned}
 
 app.include_router(auth_router, prefix="/auth")

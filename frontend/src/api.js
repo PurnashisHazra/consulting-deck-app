@@ -14,3 +14,13 @@ export async function generateSlides(data, token) {
     if (!response.ok) throw new Error("Failed to generate slides");
     return await response.json();
 }
+
+export async function fetchSavedDecks(token) {
+  const ep = '/my_decks';
+  const response = await fetch(`${API_BASE_URL}${ep}`, {
+    method: 'GET',
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error('Failed to fetch saved decks');
+  return await response.json();
+}

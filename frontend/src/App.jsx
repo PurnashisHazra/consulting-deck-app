@@ -3,7 +3,7 @@ import { useState, useEffect, createContext, useContext } from "react";
 import SlideForm from "./components/SlideForm";
 import SlidePreview from "./components/SlidePreview";
 import CanvasSlidePreview from "./components/CanvasSlidePreview";
-import { generateSlides, API_BASE_URL } from "./api";
+import { generateSlides, API_BASE_URL, fetchSavedDecks } from "./api";
 import LoginSignup from "./components/LoginSignup";
 import HomePage from "./components/HomePage";
 import PricingPage from "./components/PricingPage";
@@ -468,6 +468,8 @@ function App() {
   const { isAuthenticated, setIsAuthenticated, token, setToken } = useContext(AuthContext);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [showCoinDropdown, setShowCoinDropdown] = useState(false);
+  const [savedDecks, setSavedDecks] = useState([]);
+  const [showSavedDecksDropdown, setShowSavedDecksDropdown] = useState(false);
   // Fetch user name if authenticated
   useEffect(() => {
     
@@ -484,6 +486,13 @@ function App() {
             const data = await response.json();
             setUserName("Hi " + data.name);
             setUserCoins(data.coins ?? 0);
+            // fetch saved decks
+            try {
+              const decksRes = await fetchSavedDecks(token);
+              setSavedDecks(decksRes.decks || []);
+            } catch (err) {
+              console.warn('Failed to fetch saved decks', err);
+            }
           } else if (response.status === 401) {
             const errorData = await response.json();
             if (errorData.detail === "Token has expired. Please log in again.") {
@@ -748,6 +757,43 @@ function App() {
                     <div className="flex items-center justify-between mb-6">
                       <h2 className="text-2xl font-semibold text-gray-900">Generated Slides</h2>
                       <div className="flex items-center gap-2">
+                      {/* Saved Decks Dropdown */}
+                      <div className="relative">
+                        <button
+                          onClick={() => setShowSavedDecksDropdown(v => !v)}
+                          className="px-3 py-1 border rounded text-sm bg-white hover:bg-gray-50"
+                        >
+                          Saved decks
+                        </button>
+                        {showSavedDecksDropdown && (
+                          <div className="absolute right-0 mt-2 w-64 bg-white border rounded-lg shadow-lg py-2 z-50 max-h-72 overflow-auto">
+                            {savedDecks.length === 0 ? (
+                              <div className="px-4 py-2 text-sm text-gray-500">No saved decks</div>
+                            ) : (
+                              savedDecks.map((d, idx) => (
+                                <button
+                                  key={idx}
+                                  onClick={() => {
+                                    // Load the saved deck into the canvas
+                                    try {
+                                      const deck = d.deck || d;
+                                      setSlides(deck.slides || []);
+                                      setOptimizedStoryline(deck.optimized_storyline || []);
+                                      setShowSavedDecksDropdown(false);
+                                    } catch (e) {
+                                      console.error('Failed to load deck', e);
+                                    }
+                                  }}
+                                  className="w-full text-left px-4 py-2 hover:bg-gray-100 text-sm"
+                                >
+                                  <div className="font-medium">{d.deck?.slides?.[0]?.title || d.title || 'Untitled'}</div>
+                                  <div className="text-xs text-gray-500">{new Date(d.created_at).toLocaleString()}</div>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
                         {/* <button
                           onClick={() => {
                             setSlides(mockResponse.slides);

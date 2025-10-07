@@ -52,7 +52,7 @@ const dummyData = {
   },
 };
 
-const COLORS = ["#4169e1", "#82ca9d", "#8884d8"];
+const COLORS = ["#2563eb", "#06b6d4", "#8b5cf6", "#f59e0b", "#10b981", "#ef4444", "#fb7185"];
 
 function normalizeChartData(type, data) {
   if (!data) return dummyData[type] || dummyData["Bar Chart"];
@@ -84,6 +84,7 @@ const chartjsTypeMap = {
   "Scatter Plot": "scatter",
   "Waterfall Chart": "bar", // Use floating bars
   "Gantt Chart": "bar", // Use stacked horizontal bar
+  "Stacked Bar Chart": "bar",
 };
 
 function getChartJSComponent(type) {
@@ -98,6 +99,7 @@ function getChartJSComponent(type) {
     case "Scatter Plot": return ChartJSScatter;
     case "Waterfall Chart": return ChartJSBar;
     case "Gantt Chart": return ChartJSBar;
+    case "Stacked Bar Chart": return ChartJSBar;
     default: return null;
   }
 }
@@ -140,36 +142,88 @@ function getChartJSData(type, data) {
       ]
     };
   }
+  if (/stack/i.test(type)) {
+    // Build stacked vertical bar chart
+    const labels = (data && (data.labels || data.x || data.categories)) ? (data.labels || data.x || data.categories) : (Array.isArray(data) ? data.map(d => d.label) : ["A", "B", "C"]);
+    let datasets = [];
+    // If user provided Chart.js-style datasets, use them
+    if (data && Array.isArray(data.datasets) && data.datasets.length > 0) {
+      datasets = data.datasets.map((ds, i) => ({
+        ...ds,
+        backgroundColor: ds.backgroundColor || COLORS[i % COLORS.length],
+        borderColor: ds.borderColor || ds.backgroundColor || COLORS[i % COLORS.length],
+      }));
+    } else if (data && Array.isArray(data.series) && data.series.length > 0) {
+      // Support { labels: [...], series: [{ name, values: [...] }, ...] }
+      datasets = data.series.map((s, i) => ({
+        label: s.name || `Series ${i + 1}`,
+        data: s.values || [],
+        backgroundColor: (s.color || COLORS[i % COLORS.length]),
+      }));
+    } else if (data && Array.isArray(data.values) && Array.isArray(data.values[0])) {
+      // Support values as array of arrays: [[s1...], [s2...]] where each inner is a dataset per label
+      datasets = data.values.map((vals, i) => ({ label: `Series ${i + 1}`, data: vals, backgroundColor: COLORS[i % COLORS.length] }));
+    } else if (Array.isArray(data)) {
+      // single series fallback
+      datasets = [{ label: type, data: data.map(d => d.value), backgroundColor: COLORS[0] }];
+    } else if (data && data.labels && data.values && Array.isArray(data.values[0]) ) {
+      // labels + values as array of arrays
+      datasets = data.values.map((vals, i) => ({ label: `Series ${i + 1}`, data: vals, backgroundColor: COLORS[i % COLORS.length] }));
+    } else if (data && data.labels && data.datasets) {
+      datasets = data.datasets.map((ds, i) => ({ ...ds, backgroundColor: ds.backgroundColor || COLORS[i % COLORS.length] }));
+    } else {
+      // Try to create two series by splitting values if possible
+      const arr = normalizeChartData("Bar Chart", data);
+      if (arr && arr.length > 0) {
+        datasets = [{ label: "Series 1", data: arr.map(d => d.value), backgroundColor: COLORS[0] }];
+      }
+    }
+    return { labels, datasets };
+  }
   if (type === "Waterfall Chart") {
-    // Generalize: convert any array of x numbers to x/2 pairs, pad with dummies if needed
-    let values = Array.isArray(data?.values) ? data.values : [100, 50, -30, 120];
-    let pairs = [];
-    let nPairs = Math.ceil(values.length / 2);
-    for (let i = 0; i < values.length; i += 2) {
-      pairs.push([
-        values[i],
-        values[i + 1] !== undefined ? values[i + 1] : values[i]
-      ]);
+    // Proper waterfall formatting: compute base (starting y) and height for each bar
+    const values = Array.isArray(data?.values) ? data.values : (Array.isArray(data) ? data.map(d => d.value || 0) : [100, 50, -30, 120]);
+    const labels = Array.isArray(data?.steps) ? data.steps : (Array.isArray(data?.labels) ? data.labels : values.map((_, i) => `Step ${i+1}`));
+    // Build cumulative baseline and bar heights
+    let cumulative = 0;
+    const bases = [];
+    const heights = [];
+    const bg = [];
+    for (let i = 0; i < values.length; i++) {
+      const v = Number(values[i]) || 0;
+      // if positive, bar starts at cumulative and height is v
+      // if negative, bar starts at cumulative + v and height is Math.abs(v)
+      if (v >= 0) {
+        bases.push(cumulative);
+        heights.push(v);
+        bg.push('#10B981'); // green for positive
+        cumulative += v;
+      } else {
+        bases.push(cumulative + v);
+        heights.push(Math.abs(v));
+        bg.push('#EF4444'); // red for negative
+        cumulative += v;
+      }
     }
-    // Pad to nPairs with dummies if needed
-    while (pairs.length < nPairs) {
-      pairs.push([0, 0]);
-    }
-    let steps = Array.isArray(data?.steps) && data.steps.length === pairs.length
-      ? data.steps
-      : (Array.isArray(data?.labels) && data.labels.length === pairs.length
-        ? data.labels
-        : pairs.map((_, i) => `Step ${i + 1}`));
-    let bars = pairs.map((pair, i) => ({ x: steps[i], y: pair }));
+
+    // Chart.js floating bars are implemented by datasets with 'data' objects {x: label, y: value} when using bar
+    // We'll create two stacked datasets: one invisible base (transparent), then visible heights
     return {
-      labels: steps,
-      datasets: [{
-        label: "Waterfall",
-        data: bars.map(b => b.y),
-        backgroundColor: '#4169e1',
-        borderColor: '#4169e1',
-        borderWidth: 2,
-      }]
+      labels,
+      datasets: [
+        {
+          label: 'base',
+          data: bases,
+          backgroundColor: 'rgba(0,0,0,0)',
+          stack: 'waterfall'
+        },
+        {
+          label: 'change',
+          data: heights,
+          backgroundColor: bg,
+          stack: 'waterfall'
+        }
+      ]
     };
   }
   if (["Pie Chart", "Doughnut Chart", "Radar Chart", "Polar Area Chart"].includes(type)) {
@@ -179,7 +233,7 @@ function getChartJSData(type, data) {
       datasets: [{
         label: type,
         data: arr.map(d => d.value),
-        backgroundColor: ["#4169e1", "#82ca9d", "#8884d8"],
+        backgroundColor: COLORS,
       }]
     };
   }
@@ -324,9 +378,19 @@ export default function ChartRenderer({
     // Chart.js fallback
     const ChartJSComponent = getChartJSComponent(type);
     const chartJSData = getChartJSData(type, data);
+    // detect stacked types
+    const isStacked = /stack/i.test(type) || type === "Gantt Chart";
+    const chartOptions = {
+      responsive: true,
+      plugins: { legend: { display: true }, title: { display: true, text: type } },
+      scales: {
+        x: { stacked: isStacked },
+        y: { stacked: isStacked }
+      }
+    };
     chartContent = ChartJSComponent ? (
       <div style={{ width: '100%', height: 250 }}>
-        <ChartJSComponent data={chartJSData} options={{ responsive: true, plugins: { legend: { display: true }, title: { display: true, text: type } } }} />
+        <ChartJSComponent data={chartJSData} options={chartOptions} />
       </div>
     ) : null;
   } else {
