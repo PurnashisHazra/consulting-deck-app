@@ -1,23 +1,60 @@
-import React, { useRef } from 'react';
-import ReactFlow from 'reactflow';
+import React from 'react';
 
-// Compact SmartArt-like flow for section text
-export default function SmartArtFlow({ items = [], numberOfNodes, gridHeight }) {
-  const reactFlowWrapper = useRef(null);
-  // Use provided numberOfNodes and gridHeight, or fallback to items.length and default height
+// Simple SmartArt: render items as stacked boxes with bullet lists when appropriate.
+export default function SmartArtFlow({ items = [], numberOfNodes, gridHeight, palette }) {
   const nodeCount = numberOfNodes || items.length;
-  const height = gridHeight || Math.max(180, nodeCount * 30);
-  // Calculate vertical spacing
-  const spacing = nodeCount > 1 ? height / (nodeCount*3) : height / 2;
-  const nodes = items.map((text, idx) => ({
-    id: `node-${idx}`,
-    data: { label: text },
-    position: { x: 0, y: idx * spacing },
-    style: { background: '#e1e6f7ff', color: '#1e293b', border: '2px solid #6366f1', borderRadius: 8, padding: 12, minWidth: 220, boxShadow: '0 2px 8px #e0e7ff' }
-  }));
+  const minHeight = gridHeight || Math.max(120, nodeCount * 48);
+
+  const nodePalette = Array.isArray(palette) && palette.length > 0 ? palette : ['#6366f1'];
+
+  const normalizeItem = (text) => {
+    if (text === null || text === undefined) return '';
+    if (typeof text === 'string') return text;
+    if (typeof text === 'number' || typeof text === 'boolean') return String(text);
+    if (Array.isArray(text)) return text; // return arrays for bullet lists
+    if (typeof text === 'object') {
+      try { return JSON.stringify(text); } catch (e) { return String(text); }
+    }
+    return String(text);
+  };
+
   return (
-    <div style={{ width: '100%', height: '100%', minHeight: height, overflow: 'auto' }} ref={reactFlowWrapper}>
-      <ReactFlow nodes={nodes} edges={[]} fitView={items.length > 0} style={{ width: '100%', height: '100%' }} proOptions={{ hideAttribution: true }} />
+    <div style={{ width: '100%' }}>
+      <div style={{ minHeight: minHeight }} className="flex flex-col gap-3">
+        {items.map((raw, idx) => {
+          const accent = nodePalette[idx % nodePalette.length];
+          const bg = (/^#([A-Fa-f0-9]{6})$/.test(String(accent))) ? `${accent}10` : `${accent}`;
+          const accentHex = String(accent);
+          const item = normalizeItem(raw);
+
+          return (
+            <div key={idx} className="rounded-lg p-3" style={{ background: bg, borderLeft: `6px solid ${accentHex}` }}>
+              {Array.isArray(item) ? (
+                <ul className="list-disc pl-5 text-sm" style={{ color: '#111827' }}>
+                  {item.map((it, i) => (
+                    <li key={i}>{String(it)}</li>
+                  ))}
+                </ul>
+              ) : (
+                // Split long strings into bullet-like lines if multiple sentences or newlines
+                (() => {
+                  if (typeof item === 'string') {
+                    const parts = item.split(/\n|\.|;|\u2022/).map(s => s.trim()).filter(Boolean);
+                    if (parts.length > 1) {
+                      return (
+                        <ul className="list-disc pl-5 text-sm" style={{ color: '#111827' }}>
+                          {parts.map((p, i) => <li key={i}>{p}</li>)}
+                        </ul>
+                      );
+                    }
+                  }
+                  return <div className="text-sm" style={{ color: '#111827' }}>{String(item)}</div>;
+                })()
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

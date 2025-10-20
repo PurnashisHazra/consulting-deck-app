@@ -1,9 +1,34 @@
-import { useState } from "react";
-import FrameworkDiagram from "./FrameworkDiagram";
+import { useState, useEffect } from "react";
 import ChartRenderer from "./ChartRenderer";
+import { getPalette } from '../api';
+import { readableTextOnAlphaBg, ensureHex } from '../utils/colorUtils';
 
-export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedStoryline, useMockData, setUseMockData, onGenerateMockSlides }) {
+export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedStoryline }) {
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+  const [palette, setPalette] = useState(null);
+
+  const LOCAL_PALETTE = ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6'];
+
+  const getCardPalette = () => {
+    const src = (palette && Array.isArray(palette) && palette.length > 0) ? palette : LOCAL_PALETTE;
+    return src.map(c => {
+      const clean = String(c || '').trim();
+      const accent = clean;
+      const bg = (/^#([A-Fa-f0-9]{6})$/.test(clean)) ? `${clean}20` : `${clean}`;
+      return { accent, bg };
+    });
+  };
+
+  const CARD_PALETTE = getCardPalette();
+
+  useEffect(() => {
+    let mounted = true;
+    getPalette().then(p => {
+      if (!mounted) return;
+      if (p && p.colors && Array.isArray(p.colors)) setPalette(p.colors);
+    }).catch(() => {});
+    return () => { mounted = false };
+  }, []);
 
   if (isLoading) {
     return (
@@ -24,15 +49,6 @@ export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedSto
         </div>
         <h3 className="text-lg font-medium text-gray-900 mb-2">No slides yet</h3>
         <p className="text-gray-500">Fill out the form and click "Generate Slides" to create your presentation</p>
-        <button
-          className="mt-6 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-          onClick={() => {
-            setUseMockData(true);
-            if (onGenerateMockSlides) onGenerateMockSlides();
-          }}
-        >
-          Generate Mock Slides
-        </button>
       </div>
     );
   }
@@ -115,178 +131,104 @@ export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedSto
       </div>
 
       {/* Current Slide */}
-      <div id="slide-container"
-        className="bg-white border border-gray-300 shadow-lg mx-auto origin-top overflow-hidden max-w-full"
+      <div
+        className="bg-white border border-gray-300 shadow-lg mx-auto origin-top"
         style={{ width: 1280 * zoom, height: 720 * zoom }}
       >
-        {/* Linear Arrow Navigation - full width */}
-        <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between w-full overflow-x-auto">
-          {slides.map((slide, idx) => (
-            <div key={slide.slide_number} className="flex items-center flex-1 min-w-0">
-              <button
-                onClick={() => setCurrentSlideIndex(idx)}
-                className={`w-full px-3 py-1 rounded-lg text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 min-w-0 truncate
-                  ${idx === currentSlideIndex ? 'bg-blue-600 text-white shadow' : 'bg-gray-100 text-gray-700 hover:bg-blue-100'}`}
-                aria-current={idx === currentSlideIndex ? 'true' : undefined}
-              >
-                <span className="block font-bold">{slide.slide_number}</span>
-                <span className="block truncate text-xs">{slide.title}</span>
-              </button>
-              {idx < slides.length - 1 && (
-                <svg className="w-5 h-5 text-gray-400 mx-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              )}
+        {/* Top Navigation Bar */}
+        <div className="bg-gray-900 text-white px-6 py-3 flex items-center justify-between border-b border-gray-700">
+          <div className="flex items-center space-x-4">
+            <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center">
+              <span className="text-white font-bold text-sm">M</span>
             </div>
-          ))}
+            <div>
+              <h1 className="text-lg font-semibold">Next Gen Consulting</h1>
+              <p className="text-xs text-gray-300">Confidential and Proprietary</p>
+            </div>
+          </div>
+          <div className="flex items-center space-x-4">
+            <span className="text-sm font-medium">Slide {currentSlide.slide_number}</span>
+            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+          </div>
         </div>
 
         {/* Slide Content */}
-  <div className="p-6 h-full flex flex-col max-w-full overflow-hidden">
+        <div className="p-6 h-full flex flex-col">
           {/* Title Section */}
           <div className="mb-4">
             <h2 className="text-2xl font-bold text-gray-900 mb-2">{currentSlide.title}</h2>
             <div className="w-16 h-1 bg-blue-600"></div>
           </div>
 
-          {/* Main Content Grid - dynamic layout */}
-          <div
-            className="flex-1 gap-6 max-w-full overflow-hidden"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gridTemplateRows: '1fr 1fr',
-              gridTemplateAreas: `
-                "topLeft topRight"
-                "bottomLeft bottomRight"
-              `,
-            }}
-          >
-            {/* Chart Section */}
-            {console.log("Current Slide Visualization:", currentSlide.visualization, "Data:", currentSlide)}
-            <div
-              className="flex flex-col items-center justify-center bg-white border border-gray-100 rounded-lg h-full w-full flex-grow"
-              style={{ gridArea: currentSlide.layout?.chart || 'topLeft', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}
-            >
-              <div className="w-full flex items-center justify-between mb-2">
-                <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">{currentSlide.visualization}</span>
-              </div>
-              {/* Chart Enhancements */}
-              {currentSlide.data && currentSlide.data.length > 0 ? (
-                <div className="flex w-full h-64">
-                  {/* Left-aligned chart */}
-                  <div className="flex-shrink-0 w-1/2 h-full flex items-center justify-center">
-                    {currentSlide.chart_image ? (
-                      <img
-                        src={currentSlide.chart_image}
-                        alt={currentSlide.visualization}
-                        className="max-h-56 w-auto object-contain rounded"
-                      />
-                    ) : (
-                      <ChartRenderer
-                        type={currentSlide.visualization}
-                        data={currentSlide.data}
-                        showAxes={true}
-                        showLegend={true}
-                        highlightPoints={true}
-                      />
-                    )}
-                  </div>
-                  {/* Related data on the right */}
-                  <div className="flex-grow pl-4">
-                    <div className="text-sm text-gray-700">
-                      <p><strong>X-Axis:</strong> {currentSlide.chart_data.xAxisTitle || "Not available"}</p>
-                      <p><strong>Y-Axis:</strong> {currentSlide.chart_data.yAxisTitle || "Not available"}</p>
-                      <p><strong>Legend:</strong> {currentSlide.chart_data.legend || "Not available"}</p>
-                    </div>
-                    <div className="mt-4">
-                      <h4 className="text-sm font-semibold text-gray-800">Inferences</h4>
-                      <ul className="list-disc list-inside text-xs text-gray-700">
-                        {currentSlide.chart_data?.inferences?.map((inference, idx) => (
-                          <li key={idx}>{inference}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
+          {/* Main Content Grid */}
+          <div className="flex-1 grid grid-cols-12 gap-6">
+            {/* Left Column - Chart and Analysis */}
+            <div className="col-span-8 space-y-4">
+              {/* Chart Section */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 h-64">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-wide">Analysis</h3>
+                  <span className="text-xs text-gray-500 bg-gray-200 px-2 py-1 rounded">{currentSlide.visualization}</span>
                 </div>
-              ) : (
-                <div className="flex w-full h-64">
-                  {/* Sample chart */}
-                  <div className="flex-shrink-0 w-1/2 h-full flex items-center justify-center">
-                    <ChartRenderer
-                      type="Bar Chart"
-                      data={[{ label: "Sample A", value: 50 }, { label: "Sample B", value: 75 }]}
-                      showAxes={true}
-                      showLegend={true}
-                      highlightPoints={false}
-                    />
-                  </div>
-                  {/* Instructions on the right */}
-                  <div className="flex-grow pl-4">
-                    <div className="text-sm text-gray-700">
-                      <p><strong>Instructions:</strong></p>
-                      <p>To create this chart, provide data points with labels and values. Ensure the X-axis represents categories and the Y-axis represents numerical values.</p>
-                      <p>Example data format:</p>
-                      <pre className="bg-gray-100 p-2 rounded text-xs">
-                        {[
-                          {"label": "Category 1", "value": 100},
-                          {"label": "Category 2", "value": 75}
-                        ]}
-                      </pre>
-                    </div>
-                  </div>
+                <div className="h-48 flex items-center justify-center">
+                  {currentSlide.chart_image ? (
+                    <img src={currentSlide.chart_image} alt={currentSlide.visualization} className="max-h-48 w-full object-contain rounded" />
+                  ) : (
+                    <ChartRenderer type={currentSlide.visualization} data={currentSlide.data} palette={palette} />
+                  )}
                 </div>
-              )}
-            </div>
-
-            {/* Key Insights */}
-            <div
-              className="grid grid-cols-2 gap-4 min-w-0 h-full w-full flex-grow"
-              style={{ gridArea: currentSlide.layout?.keyInsights || 'bottomRight' }}
-            >
-              <div className="bg-blue-50 border-l-4 border-blue-500 p-3 overflow-auto max-h-24">
-                <h4 className="text-xs font-semibold text-blue-800 uppercase tracking-wide mb-2">Key Insight</h4>
-                <p className="text-sm text-blue-900">{currentSlide.takeaway}</p>
               </div>
-              <div className="bg-green-50 border-l-4 border-green-500 p-3 overflow-auto max-h-24">
-                <h4 className="text-xs font-semibold text-green-800 uppercase tracking-wide mb-2">Next Steps</h4>
-                <p className="text-sm text-green-900">{currentSlide.call_to_action}</p>
+
+              {/* Key Insights */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-3" style={{ background: CARD_PALETTE[0].bg, borderLeft: `6px solid ${CARD_PALETTE[0].accent}` }}>
+                  <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[0].accent), 0.12) }}>Key Insight</h4>
+                  <p className="text-sm" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[0].accent), 0.12) }}>{currentSlide.takeaway}</p>
+                </div>
+                <div className="p-3" style={{ background: CARD_PALETTE[1].bg, borderLeft: `6px solid ${CARD_PALETTE[1].accent}` }}>
+                  <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[1].accent), 0.12) }}>Next Steps</h4>
+                  <p className="text-sm" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[1].accent), 0.12) }}>{currentSlide.call_to_action}</p>
+                </div>
               </div>
             </div>
 
-            {/* Key Points */}
-            <div
-              className="bg-white border border-gray-200 rounded-lg p-4 overflow-auto h-full w-full flex-grow"
-              style={{ gridArea: currentSlide.layout?.keyPoints || 'bottomLeft' }}
-            >
-              <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-wide mb-3">Key Points</h3>
-              <ul className="space-y-2">
-                {currentSlide.content.map((point, i) => (
-                  <li key={i} className="flex items-start space-x-2">
-                    <div className="w-1.5 h-1.5 bg-blue-600 rounded-full mt-2 flex-shrink-0"></div>
-                    <span className="text-xs text-gray-700 leading-relaxed">{point}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            {/* Right Column - Details and Frameworks */}
+            <div className="col-span-4 space-y-4">
+              {/* Key Points */}
+              <div className="bg-white border border-gray-200 rounded-lg p-4">
+                <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-wide mb-3">Key Points</h3>
+                <ul className="space-y-2">
+                  {currentSlide.content.map((point, i) => (
+                    <li key={i} className="flex items-start space-x-2">
+                      <div className="w-1.5 h-1.5 rounded-full mt-2 flex-shrink-0" style={{ background: CARD_PALETTE[0].accent }}></div>
+                      <span className="text-xs text-gray-700 leading-relaxed">{point}</span>
+                    </li>
+                  ))}
+            </ul>
+              </div>
 
-            {/* Frameworks */}
-              <div
-                className="bg-gray-50 border border-gray-200 rounded-lg p-4 overflow-auto h-full w-full flex-grow"
-                style={{ gridArea: currentSlide.layout?.frameworks || 'topRight' }}
-              >
+              {/* Frameworks */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
                 <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-wide mb-3">Frameworks</h3>
                 {currentSlide.frameworks && currentSlide.frameworks.length > 0 ? (
                   <div className="space-y-3">
                     {currentSlide.frameworks.map((framework, idx) => (
                       <div key={idx} className="bg-white border border-gray-200 rounded p-2">
                         <div className="flex items-center space-x-2 mb-1">
-                          <div className="w-2 h-2 bg-blue-600 rounded-full flex-shrink-0"></div>
+                          <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: palette && palette[0] ? palette[0] : '#2563eb' }}></div>
                           <span className="text-xs font-semibold text-gray-800">{framework}</span>
                         </div>
-                        <div className="my-2">
-                          <FrameworkDiagram framework={framework} frameworkData={currentSlide.framework_data ? currentSlide.framework_data[framework] : undefined} />
-                        </div>
+                        <p className="text-xs text-gray-600 ml-4">
+                          {framework === "SWOT Analysis" && "Strengths, Weaknesses, Opportunities, Threats"}
+                          {framework === "Porter's Five Forces" && "Competitive rivalry, Supplier power, Buyer power, Threat of substitution, Threat of new entry"}
+                          {framework === "BCG Matrix" && "Stars, Cash Cows, Question Marks, Dogs"}
+                          {framework === "Value Chain Analysis" && "Primary and support activities analysis"}
+                          {framework === "PEST Analysis" && "Political, Economic, Social, Technological factors"}
+                          {framework === "Ansoff Matrix" && "Market penetration, Market development, Product development, Diversification"}
+                          {framework === "McKinsey 7S" && "Strategy, Structure, Systems, Shared values, Style, Staff, Skills"}
+                          {framework === "Balanced Scorecard" && "Financial, Customer, Internal processes, Learning & growth"}
+                          {!["SWOT Analysis", "Porter's Five Forces", "BCG Matrix", "Value Chain Analysis", "PEST Analysis", "Ansoff Matrix", "McKinsey 7S", "Balanced Scorecard"].includes(framework) && "Strategic analysis framework"}
+                        </p>
                       </div>
                     ))}
                   </div>
@@ -294,8 +236,33 @@ export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedSto
                   <p className="text-xs text-gray-500 italic">No frameworks suggested</p>
                 )}
               </div>
-            {/* Close grid layout */}
+
+              {/* Executive Summary */}
+              {currentSlide.executive_summary && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-amber-800 uppercase tracking-wide mb-2">Executive Summary</h3>
+                  <p className="text-xs text-amber-900">{currentSlide.executive_summary}</p>
+                </div>
+              )}
+
+              {/* Detailed Analysis */}
+              {currentSlide.detailed_analysis && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-blue-800 uppercase tracking-wide mb-2">Detailed Analysis</h3>
+                  <p className="text-xs text-blue-900">{currentSlide.detailed_analysis}</p>
+                </div>
+              )}
+
+              {/* Methodology */}
+              {currentSlide.methodology && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-green-800 uppercase tracking-wide mb-2">Methodology</h3>
+                  <p className="text-xs text-green-900">{currentSlide.methodology}</p>
+                </div>
+              )}
             </div>
+          </div>
+
           {/* Footer */}
           <div className="mt-4 pt-4 border-t border-gray-200">
             <div className="flex justify-between items-center text-xs text-gray-500">

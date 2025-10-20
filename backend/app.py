@@ -21,6 +21,7 @@ from bson import ObjectId
 import numpy as np
 import math
 import json
+import re
 from infographics_repo import INFOGRAPHIC_REPO
 
 load_dotenv()
@@ -831,6 +832,7 @@ async def generate_slides(request: SlideRequest, authorization: str = Header(Non
         # find the inserted deck id and update summary
         inserted = await decks_collection.find_one({"email": user_email, "created_at": deck_doc["created_at"]})
         if inserted:
+            console.log("Inserted deck I_D:", inserted.get("_id"))
             summary["deck_id"] = str(inserted.get("_id"))
         if user_email:
             await users_collection.update_one({"email": user_email}, {"$push": {"saved_decks": summary}})
@@ -973,3 +975,47 @@ async def my_decks(authorization: str = Header(None)):
     return {"decks": cleaned}
 
 app.include_router(auth_router, prefix="/auth")
+
+
+@app.get("/palette")
+async def get_palette():
+    """Return a 6-color palette. Try to get a recommendation from the AI, but fall back to a static palette on any error."""
+    prompt = (
+        "Provide a single JSON object with two keys: \"name\" (string) and \"colors\" (an array of exactly 6 hex color codes like '#1a2b3c'). "
+        "Keep the response strictly as JSON with no extra commentary. The palette should be harmonious and suitable for professional consulting slides."
+    )
+    # Default fallback palette
+    fallback = {"name": "Default Consulting", "colors": ["#0f172a", "#1f6feb", "#10b981", "#f59e0b", "#ef4444", "#6b7280"]}
+    try:
+        completion = openai_client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": "You are a professional designer. Return only JSON."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.35,
+        )
+        content = completion.choices[0].message.content
+        # Try to repair JSON if LLM output is slightly malformed
+        try:
+            repaired = repair_json(content)
+            parsed = json.loads(repaired)
+        except Exception:
+            # As a softer fallback, try to extract hex codes with regex
+            hexes = re.findall(r"#([0-9a-fA-F]{6})", content)
+            if len(hexes) >= 6:
+                parsed = {"name": "AI Palette", "colors": [f"#{h}" for h in hexes[:6]]}
+            else:
+                parsed = fallback
+        # Validate shape
+        if not isinstance(parsed, dict) or not isinstance(parsed.get("colors"), list) or len(parsed.get("colors")) < 6:
+            return sanitize_for_json(fallback)
+        # Ensure exactly 6 colors (trim or pad with fallback)
+        colors = parsed.get("colors")[:6]
+        if len(colors) < 6:
+            colors = colors + fallback["colors"][len(colors):]
+        result = {"name": parsed.get("name", "AI Palette"), "colors": colors}
+        return sanitize_for_json(result)
+    except Exception as e:
+        print("/palette error:", e)
+        return sanitize_for_json(fallback)

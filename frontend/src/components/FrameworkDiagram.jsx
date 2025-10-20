@@ -1,4 +1,5 @@
 import React from "react";
+import { readableTextColor, ensureHex } from '../utils/colorUtils';
 
 // Simple SVG diagrams for common frameworks
 function SWOTDiagram() {
@@ -39,7 +40,7 @@ function PlaceholderDiagram({ name }) {
   );
 }
 
-export default function FrameworkDiagram({ framework, frameworkData }) {
+export default function FrameworkDiagram({ framework, frameworkData, palette }) {
   const renderValue = (val) => {
     if (Array.isArray(val)) {
       return (
@@ -63,16 +64,22 @@ export default function FrameworkDiagram({ framework, frameworkData }) {
     }
   };
 
+  const accent = (palette && palette[0]) ? ensureHex(palette[0]) : '#374151';
+  const headerBg = /^#([A-Fa-f0-9]{6})$/.test(accent) ? `${accent}20` : '#f3f4f6';
+  const headerColor = accent;
+  // Force black text for framework tables for maximum legibility
+  const headerText = '#111827';
   return (
     <div className="overflow-x-auto h-full flex items-center justify-center">
       {(frameworkData && Object.keys(frameworkData).length > 0 )? (
-        <table className="min-w-[200px] w-full border border-gray-300 rounded text-xs">
+        <table className="min-w-[200px] w-full border rounded text-xs" style={{ borderColor: headerColor }}>
           <thead>
             <tr>
               {Object.keys(frameworkData).map((key) => (
                 <th
                   key={key}
-                  className="bg-gray-100 border px-2 py-1 text-gray-700 font-semibold"
+                  className="border px-2 py-1 font-semibold"
+                  style={{ background: headerBg, color: headerText }}
                 >
                   {key}
                 </th>
@@ -82,7 +89,7 @@ export default function FrameworkDiagram({ framework, frameworkData }) {
           <tbody>
             <tr>
               {Object.values(frameworkData).map((val, idx) => (
-                <td key={idx} className="border px-2 py-1 text-gray-600 align-top">
+                <td key={idx} className="border px-2 py-1 align-top" style={{ color: '#111827' }}>
                   {renderValue(val)}
                 </td>
               ))}

@@ -1,4 +1,5 @@
 import React from "react";
+import { readableTextColor, ensureHex, readableTextOnAlphaBg } from '../utils/colorUtils';
 import {
   BarChart,
   Bar,
@@ -52,7 +53,15 @@ const dummyData = {
   },
 };
 
-const COLORS = ["#2563eb", "#06b6d4", "#8b5cf6", "#f59e0b", "#10b981", "#ef4444", "#fb7185"];
+const DEFAULT_COLORS = ["#2563eb", "#06b6d4", "#8b5cf6", "#f59e0b", "#10b981", "#ef4444", "#fb7185"];
+// Top-level alias for legacy helpers that referenced COLORS
+const COLORS = DEFAULT_COLORS;
+
+function normalizePalette(p) {
+  if (!p) return DEFAULT_COLORS;
+  if (Array.isArray(p) && p.length > 0) return p.map(x => String(x).trim());
+  return DEFAULT_COLORS;
+}
 
 function normalizeChartData(type, data) {
   if (!data) return dummyData[type] || dummyData["Bar Chart"];
@@ -254,7 +263,10 @@ export default function ChartRenderer({
   yAxisTitle,
   legend,
   inferences,
+  palette // optional array of hex strings
 }) {
+  const COLORS = normalizePalette(palette);
+  const getColor = (i) => COLORS[i % COLORS.length];
   const meta = {
     xAxisTitle: xAxisTitle || data?.xAxisTitle || "Not available",
     yAxisTitle: yAxisTitle || data?.yAxisTitle || "Not available",
@@ -287,7 +299,11 @@ export default function ChartRenderer({
             />
             <Tooltip wrapperStyle={{ fontSize: 13, fontFamily: 'Inter, Arial, sans-serif' }} />
             <Legend wrapperStyle={{ fontSize: 13, fontWeight: 600, color: '#4169e1' }} />
-            <Bar dataKey="value" fill="#4169e1" barSize={32} />
+            <Bar dataKey="value" barSize={32}>
+              {(Array.isArray(plotData) ? plotData : dummyData["Bar Chart"]).map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={getColor(index)} />
+              ))}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       ) : type === "Line Chart" ? (
@@ -306,7 +322,7 @@ export default function ChartRenderer({
             />
             <Tooltip wrapperStyle={{ fontSize: 13, fontFamily: 'Inter, Arial, sans-serif' }} />
             <Legend wrapperStyle={{ fontSize: 13, fontWeight: 600, color: '#4169e1' }} />
-            <Line type="monotone" dataKey="value" stroke="#4169e1" strokeWidth={3} dot={{ r: 5 }} />
+            <Line type="monotone" dataKey="value" stroke={getColor(0)} strokeWidth={3} dot={{ r: 5 }} />
           </LineChart>
         </ResponsiveContainer>
       ) : type === "Pie Chart" ? (
@@ -324,7 +340,7 @@ export default function ChartRenderer({
               labelStyle={{ fontSize: 12, fontWeight: 500, fill: '#444' }}
             >
               {plotData.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                <Cell key={`cell-${index}`} fill={getColor(index)} />
               ))}
             </Pie>
             <Tooltip wrapperStyle={{ fontSize: 13, fontFamily: 'Inter, Arial, sans-serif' }} />
@@ -337,6 +353,14 @@ export default function ChartRenderer({
     // Chart.js stacked horizontal bar
     const ChartJSComponent = getChartJSComponent(type);
     const chartJSData = getChartJSData(type, data);
+    // apply palette to chartJSData datasets if not already set
+    if (chartJSData && Array.isArray(chartJSData.datasets)) {
+      chartJSData.datasets = chartJSData.datasets.map((ds, i) => ({
+        ...ds,
+        backgroundColor: ds.backgroundColor || getColor(i),
+        borderColor: ds.borderColor || ds.backgroundColor || getColor(i),
+      }));
+    }
     chartContent = (
       <div style={{ width: 250, height: 250 }}>
         <ChartJSComponent
@@ -358,6 +382,12 @@ export default function ChartRenderer({
     // Chart.js floating bars
     const ChartJSComponent = getChartJSComponent(type);
     const chartJSData = getChartJSData(type, data);
+    if (chartJSData && Array.isArray(chartJSData.datasets)) {
+      chartJSData.datasets = chartJSData.datasets.map((ds, i) => ({
+        ...ds,
+        backgroundColor: ds.backgroundColor || getColor(i),
+      }));
+    }
     chartContent = (
       <div style={{ width: '100%', height: 250 }}>
         <ChartJSComponent
@@ -378,6 +408,13 @@ export default function ChartRenderer({
     // Chart.js fallback
     const ChartJSComponent = getChartJSComponent(type);
     const chartJSData = getChartJSData(type, data);
+    if (chartJSData && Array.isArray(chartJSData.datasets)) {
+      chartJSData.datasets = chartJSData.datasets.map((ds, i) => ({
+        ...ds,
+        backgroundColor: ds.backgroundColor || getColor(i),
+        borderColor: ds.borderColor || getColor(i),
+      }));
+    }
     // detect stacked types
     const isStacked = /stack/i.test(type) || type === "Gantt Chart";
     const chartOptions = {
@@ -412,21 +449,14 @@ export default function ChartRenderer({
           <div className="font-bold text-gray-900 text-base mb-1">Inferences:</div>
 
           {meta.inferences.map((inference, idx) => {
-            // Color palette for cards
-            const cardColors = [
-              'bg-cyan-50 border-cyan-500',
-              'bg-pink-50 border-pink-500',
-              'bg-yellow-50 border-yellow-500',
-              'bg-green-50 border-green-500',
-              'bg-blue-50 border-blue-500',
-              'bg-purple-50 border-purple-500',
-              'bg-orange-50 border-orange-500',
-            ];
-            const colorClass = cardColors[idx % cardColors.length];
+            const paletteForCards = COLORS.slice(0, 6);
+            const colorHex = paletteForCards[idx % paletteForCards.length];
+            const bg = (/^#([A-Fa-f0-9]{6})$/.test(String(colorHex))) ? `${colorHex}1A` : `${colorHex}`;
+            const readable = readableTextOnAlphaBg(ensureHex(colorHex), 0.12);
             return (
-              <div key={idx} className={`mb-4 flex items-start rounded p-3 border-l-4 ${colorClass}`} style={{ minHeight: '60px' }}>
+              <div key={idx} className={`mb-4 flex items-start rounded p-3`} style={{ minHeight: '60px', borderLeft: `4px solid ${colorHex}`, background: bg, color: readable }}>
                 <div>
-                  <div className="text-gray-600 text-sm">{inference}</div>
+                  <div className="text-sm">{inference}</div>
                 </div>
               </div>
             );

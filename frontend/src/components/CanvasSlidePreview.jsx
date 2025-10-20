@@ -2,7 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import Draggable from "react-draggable";
 import FrameworkDiagram from "./FrameworkDiagram";
 import ChartRenderer from "./ChartRenderer";
+import { getPalette } from '../api';
 import SmartArtFlow from "./SmartArtFlow";
+import { readableTextOnAlphaBg, ensureHex, readableTextColor } from '../utils/colorUtils';
 
 // Accept setCurrentSlideIndex as a prop for navigation
 export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex = 0, setCurrentSlideIndex, optimizedStoryline, onGenerateMockSlides }) {
@@ -44,8 +46,8 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
 
   // Helper to generate default canvas items for a slide
   // If slide.layout and slide.sections exist, use them to build items
-  // Simple palette to make cards visually appealing and varied (component scope)
-  const PALETTE = [
+  // Local fallback palette used when AI palette isn't available
+  const LOCAL_PALETTE = [
     { bg: '#f0f9ff', accent: '#2563eb' },
     { bg: '#fff7ed', accent: '#f59e0b' },
     { bg: '#ecfeff', accent: '#06b6d4' },
@@ -53,6 +55,42 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
     { bg: '#f0fdf4', accent: '#10b981' },
     { bg: '#faf5ff', accent: '#8b5cf6' },
   ];
+
+  const [remotePalette, setRemotePalette] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+    getPalette().then(p => {
+      if (!mounted) return;
+      if (p && p.colors && Array.isArray(p.colors)) {
+        setRemotePalette(p.colors);
+      }
+    }).catch(() => {
+      // ignore, fallback to local PALETTE
+    });
+    return () => { mounted = false };
+  }, []);
+
+  const DEFAULT_COLORS = ["#2563eb", "#06b6d4", "#8b5cf6", "#f59e0b", "#10b981", "#ef4444", "#fb7185"];
+  const COLORS = (remotePalette && Array.isArray(remotePalette) && remotePalette.length > 0) ? remotePalette : DEFAULT_COLORS;
+
+  // Derive a card palette (bg + accent) from the remotePalette hex array when possible
+  const getCardPalette = () => {
+    if (remotePalette && Array.isArray(remotePalette) && remotePalette.length > 0) {
+      // map each hex to an object with accent (hex) and bg (hex + alpha suffix)
+      return remotePalette.map(c => {
+        // ensure hex starts with # and is 7 chars (#rrggbb)
+        const clean = String(c || '').trim();
+        const accent = clean;
+        // use 20 hex alpha (approx 12%) similar to other components
+        const bg = (/^#([A-Fa-f0-9]{6})$/.test(clean)) ? `${clean}20` : `${clean}`;
+        return { bg, accent };
+      });
+    }
+    return LOCAL_PALETTE;
+  };
+
+  const CARD_PALETTE = getCardPalette();
 
   const getDefaultCanvasItems = (slide) => {
     if (!slide) return [];
@@ -84,15 +122,8 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
       "Pie Chart": { labels: ["X", "Y", "Z"], values: [30, 40, 30] },
       "Waterfall Chart": { steps: ["Start", "Add", "Subtract", "End"], values: [100, 50, -30, 120] }
     };
-    // Simple palette to make cards visually appealing and varied
-    const PALETTE = [
-      { bg: '#f0f9ff', accent: '#2563eb' },
-      { bg: '#fff7ed', accent: '#f59e0b' },
-      { bg: '#ecfeff', accent: '#06b6d4' },
-      { bg: '#fef3f8', accent: '#ec4899' },
-      { bg: '#f0fdf4', accent: '#10b981' },
-      { bg: '#faf5ff', accent: '#8b5cf6' },
-    ];
+    // fallback to local palette within this function
+    const PALETTE = LOCAL_PALETTE;
 
     if (slide.layout && Array.isArray(slide.sections)) {
       // If any section requests a Gantt chart, render a full-slide Gantt that spans all rows/columns
@@ -354,13 +385,23 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
     );
     document.body.style.cursor = "nwse-resize";
   };
+  // Throttle resize updates using requestAnimationFrame to avoid layout thrash / ResizeObserver loops
+  const resizePendingRef = useRef(null);
+  const resizeScheduledRef = useRef(false);
 
-  const handleResize = (e, id) => {
+  const flushResize = () => {
+    const pending = resizePendingRef.current;
+    if (!pending) {
+      resizeScheduledRef.current = false;
+      return;
+    }
+    const { id, clientX, clientY } = pending;
+    // Apply a single state update based on the last mouse position
     setCanvasItems(items =>
       items.map(item => {
         if (item.id === id && item.resizing) {
-          const deltaX = e.clientX - item.startX;
-          const deltaY = e.clientY - item.startY;
+          const deltaX = clientX - item.startX;
+          const deltaY = clientY - item.startY;
           return {
             ...item,
             width: Math.max(120, item.startWidth + deltaX),
@@ -370,14 +411,49 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
         return item;
       })
     );
+    // clear pending and allow future scheduling
+    resizePendingRef.current = null;
+    resizeScheduledRef.current = false;
+  };
+
+  const handleResize = (e, id) => {
+    // store latest mouse position and schedule RAF if not already
+    resizePendingRef.current = { id, clientX: e.clientX, clientY: e.clientY };
+    if (!resizeScheduledRef.current) {
+      resizeScheduledRef.current = true;
+      window.requestAnimationFrame(flushResize);
+    }
   };
 
   const handleResizeEnd = (e, id) => {
-    setCanvasItems(items =>
-      items.map(item =>
-        item.id === id ? { ...item, resizing: false } : item
-      )
-    );
+    // Ensure final pending resize is flushed synchronously before clearing resizing flag
+    if (resizePendingRef.current && resizePendingRef.current.id === id) {
+      // apply final
+      const pending = resizePendingRef.current;
+      setCanvasItems(items =>
+        items.map(item => {
+          if (item.id === pending.id && item.resizing) {
+            const deltaX = pending.clientX - item.startX;
+            const deltaY = pending.clientY - item.startY;
+            return {
+              ...item,
+              width: Math.max(120, item.startWidth + deltaX),
+              height: Math.max(80, item.startHeight + deltaY),
+              resizing: false
+            };
+          }
+          return item;
+        })
+      );
+      resizePendingRef.current = null;
+      resizeScheduledRef.current = false;
+    } else {
+      setCanvasItems(items =>
+        items.map(item =>
+          item.id === id ? { ...item, resizing: false } : item
+        )
+      );
+    }
     document.body.style.cursor = "default";
   };
 
@@ -468,24 +544,28 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
       {/* Linear Arrow Navigation - full width */}
       <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between w-full overflow-x-auto"
         style={isFullScreen ? { position: 'fixed', top: 0, left: 0, width: '100vw', zIndex: 1100 } : { height: '8vh', minHeight: 56, maxHeight: '12vh' }}>
-        {slides.map((slide, idx) => (
-          <div key={slide.slide_number} className="flex items-center flex-1 min-w-0">
-            <button
-              onClick={() => setCurrentSlideIndex(idx)}
-              className={`w-full px-3 py-1 rounded-lg text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 min-w-0 truncate
-                  ${idx === currentSlideIndex ? 'bg-blue-600 text-white shadow' : 'bg-gray-100 text-gray-700 hover:bg-blue-100'}`}
-              aria-current={idx === currentSlideIndex ? 'true' : undefined}
-            >
-              <span className="block font-bold">{slide.slide_number}</span>
-              <span className="block truncate text-xs">{slide.title}</span>
-            </button>
-            {idx < slides.length - 1 && (
-              <svg className="w-5 h-5 text-gray-400 mx-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            )}
-          </div>
-        ))}
+        <div className="flex items-center w-full space-x-2 overflow-x-auto">
+          {slides.map((slide, idx) => (
+            <div key={slide.slide_number || idx} className="flex items-center">
+              <button
+                onClick={() => setCurrentSlideIndex(idx)}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 min-w-0 truncate
+                    ${idx === currentSlideIndex ? 'bg-blue-600 text-white shadow' : 'bg-gray-100 text-gray-700 hover:bg-blue-100'}`}
+                aria-current={idx === currentSlideIndex ? 'true' : undefined}
+              >
+                <div className="text-center">
+                  <div className="text-xs text-gray-500 mb-1">Slide {slide.slide_number || idx + 1}</div>
+                  <div className="max-w-32 truncate text-sm">{slide.title}</div>
+                </div>
+              </button>
+              {idx < slides.length - 1 && (
+                <svg className="w-4 h-4 text-gray-400 mx-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              )}
+            </div>
+          ))}
+        </div>
         {isFullScreen && (
           <button
             onClick={() => setIsFullScreen(false)}
@@ -497,16 +577,8 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
         )}
       </div>
       {/* Canvas Grid - dynamic based on slide.layout */}
-      <div className="flex justify-end mb-2" style={isFullScreen ? { display: 'none' } : {}}>
-        <button
-          onClick={() => setIsFullScreen(fs => !fs)}
-          className="px-4 py-2 rounded bg-green-600 text-white hover:bg-blue-700 shadow"
-        >
-          {isFullScreen ? "Minimize" : "Full Screen"}
-        </button>
-      </div>
+      {/*   */}
       <div
-        className="bg-white border border-gray-300 shadow-lg mx-auto"
         ref={canvasRef}
         style={{
           width: isFullScreen ? "100vw" : "100%",
@@ -545,29 +617,29 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                 onDrag={(e, data) => handleDrag(e, data, item.id)}
               >
                 <div
-                  className="border rounded shadow p-4 h-full w-full flex flex-col"
-                  style={{
+                  className="border rounded shadow p-4 h-full w-full flex flex-col relative group"
+                    style={{
                     boxSizing: "border-box",
                     overflow: "hidden",
-                    resize: "both",
                     minWidth: 120,
                     minHeight: 80,
                     maxWidth: "100%",
                     maxHeight: "100%",
-                    background: PALETTE[idx % PALETTE.length].bg,
-                    borderLeft: `6px solid ${PALETTE[idx % PALETTE.length].accent}`,
+                    background: CARD_PALETTE[idx % CARD_PALETTE.length].bg,
+                    borderLeft: `6px solid ${CARD_PALETTE[idx % CARD_PALETTE.length].accent}`,
                     transition: 'transform 0.12s ease, box-shadow 0.12s ease',
                   }}
                 >
                   <button
-                    className="absolute top-2 right-2 text-red-500"
+                    className="absolute top-2 right-2 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto"
                     onClick={() => handleDelete(item.id)}
+                    aria-label="Delete section"
                   >
                     ✕
                   </button>
                   {/* Resize handle */}
                   <div
-                    className="absolute bottom-1 right-1 w-4 h-4 bg-blue-400 rounded cursor-nwse-resize flex items-center justify-center"
+                    className="absolute bottom-1 right-1 w-4 h-4 bg-blue-400 rounded cursor-nwse-resize flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto"
                     style={{ zIndex: 10 }}
                     onMouseDown={e => handleResizeStart(e, item.id)}
                   >
@@ -599,6 +671,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                                   yAxisTitle={chartData.yAxisTitle}
                                   legend={chartData.legend}
                                   inferences={chartData.inferences}
+                                  palette={ (remotePalette && remotePalette.length>0) ? remotePalette : CARD_PALETTE.map(p => p.accent) }
                                 />
                               );
                             })}
@@ -617,7 +690,22 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                           item.data.filter(Boolean).map((fw, idx) => (
                             <div key={idx} className="mb-2">
                               <div className="font-semibold text-xs mb-1">{fw || 'Framework'}</div>
-                              <FrameworkDiagram framework={fw} frameworkData={item.frameworkData && item.frameworkData[fw] ? item.frameworkData[fw] : undefined} />
+                {
+                  (() => {
+                    const sectionAccent = (remotePalette && remotePalette.length > 0)
+                      ? remotePalette[idx % remotePalette.length]
+                      : CARD_PALETTE[idx % CARD_PALETTE.length].accent;
+                    const fallbackPalette = (remotePalette && remotePalette.length>0) ? remotePalette : CARD_PALETTE.map(p => p.accent);
+                    const paletteForFramework = [sectionAccent, ...fallbackPalette.filter(p => p !== sectionAccent)];
+                    return (
+                      <FrameworkDiagram
+                        framework={fw}
+                        frameworkData={item.frameworkData && item.frameworkData[fw] ? item.frameworkData[fw] : undefined}
+                        palette={paletteForFramework}
+                      />
+                    );
+                  })()
+                }
                             </div>
                           ))
                         ) : (
@@ -638,26 +726,26 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                   )}
                   {item.type === "takeaway" && (
                     <div className="grid grid-cols-2 gap-4 h-full w-full">
-                      <div className="bg-blue-50 border-l-4 border-blue-500 p-3 overflow-auto">
-                        <h4 className="text-xs font-semibold text-blue-800 uppercase tracking-wide mb-2">Key Insight</h4>
-                        <p className="text-sm text-blue-900">{item.data.takeaway}</p>
-                      </div>
-                      <div className="bg-green-50 border-l-4 border-green-500 p-3 overflow-auto">
-                        <h4 className="text-xs font-semibold text-green-800 uppercase tracking-wide mb-2">Next Steps</h4>
-                        <p className="text-sm text-green-900">{item.data.call_to_action}</p>
-                      </div>
+                        <div className="p-3 overflow-auto" style={{ background: CARD_PALETTE[0].bg, borderLeft: `6px solid ${CARD_PALETTE[0].accent}` }}>
+                          <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[0].accent), 0.12) }}>Key Insight</h4>
+                          <p className="text-sm" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[0].accent), 0.12) }}>{item.data.takeaway}</p>
+                        </div>
+                        <div className="p-3 overflow-auto" style={{ background: CARD_PALETTE[1].bg, borderLeft: `6px solid ${CARD_PALETTE[1].accent}` }}>
+                          <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[1].accent), 0.12) }}>Next Steps</h4>
+                          <p className="text-sm" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[1].accent), 0.12) }}>{item.data.call_to_action}</p>
+                        </div>
                     </div>
                   )}
                   {/* Card format for custom/unknown types and new AI sections */}
                   {!["chart", "frameworks", "keyPoints", "takeaway"].includes(item.type) && (
-                    <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex flex-col items-start h-full w-full overflow-auto" style={{ justifyContent: 'flex-start', minHeight: 0, height: '100%', maxHeight: '100%' }}>
+                    <div className="rounded-xl border border-gray-200 p-4 shadow-sm flex-1 flex flex-col items-start overflow-auto" style={{ background: 'rgba(255,255,255,0.9)', justifyContent: 'flex-start', minHeight: 0 }}>
                       {/* Section Title */}
                       <div className="mb-4 w-full">
                         <h3 className="text-base font-bold text-gray-800 uppercase tracking-wide mb-3">{item.title || item.type || "SECTION"}</h3>
                         {(() => {
                           if (Array.isArray(item.data)) {
                             // Array: show as SmartArt flowchart
-                            return <SmartArtFlow items={item.data} />;
+                            return <SmartArtFlow items={item.data} palette={ [ (remotePalette && remotePalette.length>0) ? remotePalette[idx % remotePalette.length] : CARD_PALETTE[idx % CARD_PALETTE.length].accent ] } />;
                           } else if (typeof item.data === 'object' && item.data !== null) {
                             // Object: pretty JSON, no bullet
                             return (
@@ -669,7 +757,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                             // String: split into bullets if possible
                             const points = item.data.split(/\n|\r|\u2022|^- /gm).map(s => s.trim()).filter(s => s && s !== '-');
                             if (points.length > 1) {
-                              return <SmartArtFlow items={points} />;
+                              return <SmartArtFlow items={points} palette={ (remotePalette && remotePalette.length>0) ? remotePalette : CARD_PALETTE.map(p=>p.accent) } />;
                             } else {
                               return (
                                 <span className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">{item.data}</span>
@@ -694,7 +782,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                             <h4 className="font-bold text-xs text-blue-700 mb-2">Charts</h4>
                             <div className="flex flex-col gap-2">
 
-                              <ChartRenderer type={item.chartType} data={item.chartData} />
+                              <ChartRenderer type={item.chartType} data={item.chartData} palette={ (remotePalette && remotePalette.length>0) ? remotePalette : CARD_PALETTE.map(p => p.accent) } />
                             </div>
                           </div>
                         );
@@ -728,21 +816,32 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                           <div className="mt-4">
                             <h4 className="font-bold text-xs text-green-700 mb-2">Frameworks</h4>
                             <div className="flex flex-col gap-4">
-                              {frameworksArr.map((fw, idx) => {
+                              {frameworksArr.map((fw, fwIdx) => {
                                 if (!fw) return null;
                                 const fwData = (item.frameworkData && (item.frameworkData[fw] || item.frameworkData.find?.(f => f.framework === fw)?.data)) || {};
                                 if (!fwData || typeof fwData !== 'object' || Object.keys(fwData).length === 0) return null;
+
+                                // Use the section (card) palette color for this framework table
+                                const sectionAccent = (remotePalette && remotePalette.length > 0)
+                                  ? remotePalette[idx % remotePalette.length]
+                                  : CARD_PALETTE[idx % CARD_PALETTE.length].accent;
+                                const sectionAccentHex = ensureHex(sectionAccent);
+                                const tableBorder = sectionAccentHex;
+                                const thBg = (/^#([A-Fa-f0-9]{6})$/.test(sectionAccentHex)) ? `${sectionAccentHex}20` : '#f3f4f6';
+                                const thColor = readableTextColor(sectionAccentHex);
+                                const tdBorder = `${sectionAccentHex}10`;
+
                                 // Recursive table renderer
                                 function renderTable(data) {
                                   if (!data || typeof data !== 'object') return String(data);
                                   const keys = Object.keys(data);
                                   const rowCount = Array.isArray(data[keys[0]]) ? data[keys[0]].length : 1;
                                   return (
-                                    <table className="min-w-full text-xs border border-green-200 rounded mb-2">
+                                    <table className="min-w-full text-xs rounded mb-2" style={{ border: `1px solid ${tableBorder}` }}>
                                       <thead>
                                         <tr>
                                           {keys.map((k, i) => (
-                                            <th key={i} className="px-2 py-1 bg-green-100 text-green-700 font-semibold border-b border-green-200">{k}</th>
+                                            <th key={i} className="px-2 py-1 font-semibold" style={{ background: thBg, color: '#111827', borderBottom: `1px solid ${tableBorder}` }}>{k}</th>
                                           ))}
                                         </tr>
                                       </thead>
@@ -755,12 +854,12 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                                               if (typeof cell === 'object' && cell !== null) {
                                                 // If array of objects, render each as table
                                                 if (Array.isArray(cell)) {
-                                                  return <td key={cIdx} className="px-2 py-1 border-b border-green-100">{cell.map((obj, i) => typeof obj === 'object' ? renderTable(obj) : String(obj))}</td>;
+                                                  return <td key={cIdx} className="px-2 py-1" style={{ borderBottom: `1px solid ${tdBorder}`, color: '#111827' }}>{cell.map((obj, i) => typeof obj === 'object' ? renderTable(obj) : String(obj))}</td>;
                                                 }
                                                 // If object, render as table
-                                                return <td key={cIdx} className="px-2 py-1 border-b border-green-100">{renderTable(cell)}</td>;
+                                                return <td key={cIdx} className="px-2 py-1" style={{ borderBottom: `1px solid ${tdBorder}`, color: '#111827' }}>{renderTable(cell)}</td>;
                                               }
-                                              return <td key={cIdx} className="px-2 py-1 border-b border-green-100">{String(cell)}</td>;
+                                              return <td key={cIdx} className="px-2 py-1" style={{ borderBottom: `1px solid ${tdBorder}`, color: '#111827' }}>{String(cell)}</td>;
                                             })}
                                           </tr>
                                         ))}
@@ -769,7 +868,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                                   );
                                 }
                                 return (
-                                  <div key={idx} className="bg-green-50 border-l-4 border-green-400 p-3 rounded">
+                                  <div key={fwIdx} className="p-3 rounded" style={{ background: thBg, borderLeft: `6px solid ${sectionAccentHex}` }}>
                                     <div className="overflow-auto">
                                       {renderTable(fwData)}
                                     </div>

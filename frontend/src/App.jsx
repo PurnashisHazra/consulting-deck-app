@@ -3,7 +3,7 @@ import { useState, useEffect, createContext, useContext } from "react";
 import SlideForm from "./components/SlideForm";
 import SlidePreview from "./components/SlidePreview";
 import CanvasSlidePreview from "./components/CanvasSlidePreview";
-import { generateSlides, API_BASE_URL, fetchSavedDecks } from "./api";
+import { generateSlides, API_BASE_URL, fetchSavedDecks, saveDeck } from "./api";
 import LoginSignup from "./components/LoginSignup";
 import HomePage from "./components/HomePage";
 import PricingPage from "./components/PricingPage";
@@ -553,6 +553,22 @@ function App() {
         const result = await generateSlides(payload, token);
         setSlides(result.slides);
         setOptimizedStoryline(result.optimized_storyline || []);
+        // Auto-save the generated deck for the user (if authenticated)
+        try {
+          if (isAuthenticated && token) {
+            const deckPayload = { slides: result.slides, optimized_storyline: result.optimized_storyline || [], title: result.slides?.[0]?.title || 'Untitled' };
+            await saveDeck(deckPayload, token);
+            // refresh saved decks silently
+            try {
+              const resp = await fetchSavedDecks(token);
+              setSavedDecks(resp.decks || []);
+            } catch (err) {
+              console.warn('Failed to refresh saved decks after auto-save', err);
+            }
+          }
+        } catch (err) {
+          console.warn('Auto-save failed', err);
+        }
         // Consume a coin after successful slide generation
   const consumeRes = await fetch(`${API_BASE_URL}/auth/consume_coin`, {
           method: 'POST',
@@ -803,6 +819,33 @@ function App() {
                         >
                           Generate Mock Slides
                         </button> */}
+                        
+                        <button
+                          onClick={async () => {
+                            if (!isAuthenticated || !token) {
+                              toast.error('Please sign in to save decks');
+                              return;
+                            }
+                            try {
+                              const deckPayload = { slides, optimized_storyline: optimizedStoryline, title: slides?.[0]?.title || 'Untitled' };
+                              await saveDeck(deckPayload, token);
+                              toast.success('Deck saved');
+                              // Refresh saved decks list
+                              try {
+                                const resp = await fetchSavedDecks(token);
+                                setSavedDecks(resp.decks || []);
+                              } catch (err) {
+                                console.warn('Failed to refresh saved decks after save', err);
+                              }
+                            } catch (err) {
+                              console.error('Failed to save deck', err);
+                              toast.error('Failed to save deck');
+                            }
+                          }}
+                          className="px-3 py-1 border rounded text-sm bg-blue-600 text-white hover:bg-blue-700"
+                        >
+                          Save Deck
+                        </button>
                         <button
                           onClick={() => setZoom(z => Math.max(0.5, +(z - 0.1).toFixed(2)))}
                           className="px-3 py-1 border rounded text-sm"

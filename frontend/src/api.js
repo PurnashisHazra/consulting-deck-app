@@ -1,4 +1,3 @@
-// Determine API base URL: use REACT_APP_DEV_BACKEND if running locally, else REACT_APP_API_BASE_URL
 export const API_BASE_URL =
   window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
     ? process.env.REACT_APP_DEV_BACKEND
@@ -13,14 +12,37 @@ export async function generateSlides(data, token) {
     });
     if (!response.ok) throw new Error("Failed to generate slides");
     return await response.json();
+  }
+  
+export async function getPalette() {
+  const ep = '/palette';
+  const res = await fetch(`${API_BASE_URL}${ep}`);
+  if (!res.ok) {
+    throw new Error('Failed to fetch palette');
+  }
+  return await res.json();
 }
 
 export async function fetchSavedDecks(token) {
   const ep = '/my_decks';
-  const response = await fetch(`${API_BASE_URL}${ep}`, {
-    method: 'GET',
-    headers: { 'Authorization': `Bearer ${token}` },
+  const res = await fetch(`${API_BASE_URL}${ep}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error('Failed to fetch saved decks');
+  return await res.json();
+}
+
+export async function saveDeck(deck, token) {
+  const ep = '/save_deck';
+  const res = await fetch(`${API_BASE_URL}${ep}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(deck),
   });
-  if (!response.ok) throw new Error('Failed to fetch saved decks');
-  return await response.json();
+  if (!res.ok) {
+    const txt = await res.text().catch(() => null);
+    throw new Error(`Failed to save deck: ${res.status} ${txt || ''}`);
+  }
+  return await res.json();
 }
