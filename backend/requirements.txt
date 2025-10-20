@@ -6,6 +6,11 @@ matplotlib
 python-dotenv
 pandas
 motor
+numpy
+pymongo
+requests
+requests-oauthlib
+google-auth
 bcrypt==4.1.2
 passlib[bcrypt]==1.7.4
 pyjwt
