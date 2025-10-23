@@ -532,7 +532,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
       {/* Optimized Storyline - always visible above canvas grid */}
       {/* {renderOptimizedStoryline()} */}
       {optimizedStoryline && optimizedStoryline.length > 0 && (
-        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-6">
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-6 mb-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Optimized Storyline</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {optimizedStoryline.map((point, index) => (
@@ -549,7 +549,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
         </div>
       )}
       {/* Linear Arrow Navigation - full width */}
-      <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between w-full overflow-x-auto"
+      <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between w-full overflow-x-auto mb-6"
         style={isFullScreen ? { position: 'fixed', top: 0, left: 0, width: '100vw', zIndex: 1100 } : { height: '8vh', minHeight: 56, maxHeight: '12vh' }}>
         <div className="flex items-center w-full space-x-2 overflow-x-auto">
           {slides.map((slide, idx) => (
