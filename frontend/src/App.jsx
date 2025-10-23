@@ -794,7 +794,7 @@ function App() {
                         Generate Your Deck
                       </h2>
                     </div>
-                    <div className="max-w-5xl">
+                    <div className="">
                       <SlideForm onSubmit={handleSubmit} isLoading={isLoading} />
                     </div>
                   </div>
@@ -916,7 +916,6 @@ function App() {
                     /> */}
                     {/* Canvas Slide Preview */}
                     <div className="mt-6">
-                      <h3 className="text-xl font-semibold text-gray-900 mb-4">Interactive Slide Canvas</h3>
                       <CanvasSlidePreview 
                       slides={slides} 
                       zoom={zoom} 

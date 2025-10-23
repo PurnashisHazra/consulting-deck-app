@@ -899,6 +899,27 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
 
       </div>
       <div className="w-full bg-black flex items-center justify-end py-2 px-4" style={{ borderRadius: '0 0 12px 12px' }}>
+          <div className="flex items-center mr-auto space-x-2">
+            <button
+              className="text-white bg-gray-800 hover:bg-gray-700 px-3 py-2 rounded flex items-center gap-2 shadow"
+              onClick={() => setCurrentSlideIndex && setCurrentSlideIndex(Math.max(0, currentSlideIndex - 1))}
+              disabled={currentSlideIndex === 0}
+              aria-label="Previous slide"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+              <span className="text-sm">Previous</span>
+            </button>
+
+            <button
+              className="text-white bg-gray-800 hover:bg-gray-700 px-3 py-2 rounded flex items-center gap-2 shadow"
+              onClick={() => setCurrentSlideIndex && setCurrentSlideIndex(Math.min(slides.length - 1, currentSlideIndex + 1))}
+              disabled={currentSlideIndex === slides.length - 1}
+              aria-label="Next slide"
+            >
+              <span className="text-sm">Next</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+            </button>
+          </div>
         <button
           className="text-white bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded mr-2 flex items-center gap-2 shadow"
           onClick={async () => {

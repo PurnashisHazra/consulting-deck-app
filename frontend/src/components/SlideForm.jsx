@@ -122,10 +122,10 @@ export default function SlideForm({ onSubmit, isLoading }) {
   }, []);
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 max-w-4xl mx-auto">
+    <form onSubmit={handleSubmit} className="space-y-6 w-full">
       {/* Problem Statement */}
       <div className="space-y-2">
-        <label className="block text-sm font-medium text-gray-700">
+        <label className="block text-base font-semibold text-gray-900 mb-1">
           Problem Statement
         </label>
         <textarea 
@@ -140,29 +140,29 @@ export default function SlideForm({ onSubmit, isLoading }) {
 
       {/* Storyline */}
       <div>
-        <label className="block text-sm font-medium text-gray-700">Slide Topics / Storyline</label>
+  <label className="block text-base font-semibold text-gray-900 mb-1">Slide Topics / Storyline</label>
         <div className="mt-2 flex flex-wrap gap-2 items-center">
           {SUGGESTED_TAGS.map(tag => (
             <button
               type="button"
               key={tag}
               onClick={() => addTagToStoryline(tag)}
-              className={`px-3 py-1 rounded-full text-sm border focus:outline-none transition-colors ${isTagSelected(tag) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-200'}`}>
+              className={`px-3 py-1 rounded-full text-sm border focus:outline-none transition-colors ${isTagSelected(tag) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200'}`}>
               {tag}
             </button>
           ))}
-          <div className="flex items-center border border-dashed rounded-md px-2 py-1">
+          <div className="flex items-center gap-2">
             <input
               value={customTag}
               onChange={(e) => setCustomTag(e.target.value)}
               onKeyDown={handleCustomTagKey}
               placeholder="Add tag..."
-              className="text-sm px-1 py-0.5 outline-none"
+              className="text-sm px-2 py-1 border border-transparent focus:border-gray-300 rounded"
             />
             <button
               type="button"
               onClick={() => { const t = (customTag||'').trim(); if (t) { addTagToStoryline(t); setCustomTag(''); } }}
-              className="ml-2 text-sm text-gray-600 hover:text-gray-900"
+              className="text-sm text-gray-600 hover:text-gray-900"
             >Add</button>
           </div>
 
@@ -203,7 +203,7 @@ export default function SlideForm({ onSubmit, isLoading }) {
 
       {/* Number of Slides */}
       <div className="space-y-2">
-        <label className="block text-sm font-medium text-gray-700">
+        <label className="block text-base font-semibold text-gray-900 mb-1">
           Number of Slides
         </label>
         <input 
