@@ -4,7 +4,7 @@ import FrameworkDiagram from "./FrameworkDiagram";
 import ChartRenderer from "./ChartRenderer";
 import { getPalette } from '../api';
 import SmartArtFlow from "./SmartArtFlow";
-import { readableTextOnAlphaBg, ensureHex, readableTextColor } from '../utils/colorUtils';
+import { readableTextOnAlphaBg, ensureHex, readableTextColor, blendWithWhite, rgbToHex } from '../utils/colorUtils';
 
 // Accept setCurrentSlideIndex as a prop for navigation
 export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex = 0, setCurrentSlideIndex, optimizedStoryline, onGenerateMockSlides }) {
@@ -58,6 +58,12 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
 
   const [remotePalette, setRemotePalette] = useState(null);
 
+  // Blend fraction for creating solid pastel backgrounds from accent colors.
+  // Can be overridden with environment variable REACT_APP_CARD_BLEND (e.g., 0.08 or 0.18).
+  const CARD_BG_BLEND = typeof process !== 'undefined' && process.env && process.env.REACT_APP_CARD_BLEND
+    ? Number(process.env.REACT_APP_CARD_BLEND)
+    : 0.12;
+
   useEffect(() => {
     let mounted = true;
     getPalette().then(p => {
@@ -79,13 +85,14 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
     if (remotePalette && Array.isArray(remotePalette) && remotePalette.length > 0) {
       // map each hex to an object with accent (hex) and bg (hex + alpha suffix)
       return remotePalette.map(c => {
-        // ensure hex starts with # and is 7 chars (#rrggbb)
-        const clean = String(c || '').trim();
-        const accent = clean;
-        // use 20 hex alpha (approx 12%) similar to other components
-        const bg = (/^#([A-Fa-f0-9]{6})$/.test(clean)) ? `${clean}20` : `${clean}`;
-        return { bg, accent };
-      });
+          const raw = String(c || '').trim();
+          const ensure = ensureHex(raw);
+          const accent = ensure;
+          // Create a solid, pastel-like background by blending the accent with white
+    const blended = blendWithWhite(ensure, CARD_BG_BLEND); // configurable accent on white
+          const bg = rgbToHex(blended);
+          return { bg, accent };
+        });
     }
     return LOCAL_PALETTE;
   };
@@ -589,7 +596,8 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
           display: "grid",
           gridTemplateColumns: currentSlide && currentSlide.layout ? `repeat(${currentSlide.layout.columns}, 1fr)` : "1fr 1fr",
           gridTemplateRows: currentSlide && currentSlide.layout ? `repeat(${currentSlide.layout.rows}, 1fr)` : "1fr 1fr",
-          gap: 0,
+          gap: 0, // show space between grid cells
+          background: '#ffffff', // opaque only in fullscreen
           position: isFullScreen ? "fixed" : "relative",
           top: isFullScreen ? 56 : undefined,
           left: isFullScreen ? 0 : undefined,
@@ -738,7 +746,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                   )}
                   {/* Card format for custom/unknown types and new AI sections */}
                   {!["chart", "frameworks", "keyPoints", "takeaway"].includes(item.type) && (
-                    <div className="rounded-xl border border-gray-200 p-4 shadow-sm flex-1 flex flex-col items-start overflow-auto" style={{ background: 'rgba(255,255,255,0.9)', justifyContent: 'flex-start', minHeight: 0 }}>
+                    <div className="rounded-xl border border-gray-200 p-4 shadow-sm flex-1 flex flex-col items-start overflow-auto" style={{ background: 'rgba(255,255,255,1)', justifyContent: 'flex-start', minHeight: 0 }}>
                       {/* Section Title */}
                       <div className="mb-4 w-full">
                         <h3 className="text-base font-bold text-gray-800 uppercase tracking-wide mb-3">{item.title || item.type || "SECTION"}</h3>

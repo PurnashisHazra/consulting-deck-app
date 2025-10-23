@@ -33,8 +33,8 @@ export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedSto
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
-        <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
-        <p className="text-gray-600 font-medium">Generating your slides...</p>
+        <div className="w-8 h-8 border-4 border-gray-600 border-t-[var(--gold-400)] rounded-full animate-spin mb-4"></div>
+        <p className="text-[var(--muted)] font-medium">Generating your slides...</p>
       </div>
     );
   }
@@ -42,13 +42,13 @@ export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedSto
   if (!slides || slides.length === 0) {
     return (
       <div className="text-center py-12">
-        <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
-          <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="w-16 h-16 mx-auto mb-4 bg-gray-700 rounded-full flex items-center justify-center">
+            <svg className="w-8 h-8 text-[var(--muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
         </div>
-        <h3 className="text-lg font-medium text-gray-900 mb-2">No slides yet</h3>
-        <p className="text-gray-500">Fill out the form and click "Generate Slides" to create your presentation</p>
+        <h3 className="text-lg font-medium text-[var(--text)] mb-2">No slides yet</h3>
+        <p className="text-[var(--muted)]">Fill out the form and click "Generate Slides" to create your presentation</p>
       </div>
     );
   }
@@ -56,19 +56,20 @@ export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedSto
   const currentSlide = slides[currentSlideIndex];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
+      <div className="max-w-[1280px] mx-auto w-full space-y-4">
       {/* Storyline Overview */}
       {optimizedStoryline && optimizedStoryline.length > 0 && (
-        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Optimized Storyline</h3>
+        <div className="p-6">
+          <h3 className="text-lg font-semibold text-white mb-4">Optimized Storyline</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {optimizedStoryline.map((point, index) => (
-              <div key={index} className="bg-white border border-blue-200 rounded-lg p-4">
+              <div key={index} className="card p-4">
                 <div className="flex items-start space-x-3">
-                  <div className="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
+                  <div className="w-6 h-6 bg-[var(--gold-400)] text-slate-900 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
                     {index + 1}
                   </div>
-                  <p className="text-sm text-gray-700">{point}</p>
+                  <p className="text-sm text-[var(--muted)]">{point}</p>
                 </div>
               </div>
             ))}
@@ -76,13 +77,13 @@ export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedSto
         </div>
       )}
 
-      {/* Linear Flow Navigation */}
-      <div className="bg-white border border-gray-200 rounded-lg p-4">
+  {/* Linear Flow Navigation */}
+  <div className="p-6 text-white">
         <div className="flex items-center justify-between">
           <button
             onClick={() => setCurrentSlideIndex(Math.max(0, currentSlideIndex - 1))}
             disabled={currentSlideIndex === 0}
-            className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400 rounded-lg transition-colors"
+            className="flex items-center space-x-2 px-4 py-2 bg-transparent text-white hover:bg-gray-800/40 disabled:opacity-50 rounded-lg transition-colors"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -90,25 +91,22 @@ export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedSto
             <span className="text-sm font-medium">Previous</span>
           </button>
 
-          <div className="flex-1 mx-6">
-            <div className="flex items-center justify-center space-x-2">
+          <div className="flex-1 px-6">
+            <div className="flex items-center justify-between w-full">
               {slides.map((slide, index) => (
-                <div key={slide.slide_number} className="flex items-center">
+                <div key={slide.slide_number} className="flex-1 flex items-center justify-center">
                   <button
                     onClick={() => setCurrentSlideIndex(index)}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    className={`w-full min-w-[120px] mx-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                       index === currentSlideIndex
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        ? 'bg-[var(--gold-400)] text-slate-900'
+                        : 'bg-transparent text-white hover:bg-gray-700/40'
                     }`}
                   >
-                    <div className="text-center">
-                      <div className="text-xs text-gray-500 mb-1">Slide {slide.slide_number}</div>
-                      <div className="max-w-32 truncate">{slide.title}</div>
-                    </div>
+                    <div className="text-center truncate">{slide.title}</div>
                   </button>
                   {index < slides.length - 1 && (
-                    <svg className="w-4 h-4 text-gray-400 mx-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4 text-[var(--muted)] mx-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                     </svg>
                   )}
@@ -120,7 +118,7 @@ export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedSto
           <button
             onClick={() => setCurrentSlideIndex(Math.min(slides.length - 1, currentSlideIndex + 1))}
             disabled={currentSlideIndex === slides.length - 1}
-            className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400 rounded-lg transition-colors"
+            className="flex items-center space-x-2 px-4 py-2 bg-transparent text-white hover:bg-gray-800/40 disabled:opacity-50 rounded-lg transition-colors"
           >
             <span className="text-sm font-medium">Next</span>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -130,9 +128,11 @@ export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedSto
         </div>
       </div>
 
-      {/* Current Slide */}
+    </div>
+
+    {/* Current Slide */}
       <div
-        className="bg-white border border-gray-300 shadow-lg mx-auto origin-top"
+        className="bg-[var(--surface)] border border-gray-700 shadow-lg mx-auto origin-top"
         style={{ width: 1280 * zoom, height: 720 * zoom }}
       >
         {/* Top Navigation Bar */}
@@ -156,8 +156,8 @@ export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedSto
         <div className="p-6 h-full flex flex-col">
           {/* Title Section */}
           <div className="mb-4">
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">{currentSlide.title}</h2>
-            <div className="w-16 h-1 bg-blue-600"></div>
+            <h2 className="text-2xl font-bold text-[var(--text)] mb-2">{currentSlide.title}</h2>
+            <div className="w-16 h-1 bg-[var(--gold-400)]"></div>
           </div>
 
           {/* Main Content Grid */}
@@ -165,10 +165,10 @@ export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedSto
             {/* Left Column - Chart and Analysis */}
             <div className="col-span-8 space-y-4">
               {/* Chart Section */}
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 h-64">
+              <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 h-64">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-wide">Analysis</h3>
-                  <span className="text-xs text-gray-500 bg-gray-200 px-2 py-1 rounded">{currentSlide.visualization}</span>
+                  <h3 className="text-sm font-semibold text-[var(--text)] uppercase tracking-wide">Analysis</h3>
+                  <span className="text-xs text-[var(--muted)] bg-gray-700/40 px-2 py-1 rounded">{currentSlide.visualization}</span>
                 </div>
                 <div className="h-48 flex items-center justify-center">
                   {currentSlide.chart_image ? (
@@ -195,13 +195,13 @@ export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedSto
             {/* Right Column - Details and Frameworks */}
             <div className="col-span-4 space-y-4">
               {/* Key Points */}
-              <div className="bg-white border border-gray-200 rounded-lg p-4">
-                <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-wide mb-3">Key Points</h3>
+              <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+                <h3 className="text-sm font-semibold text-[var(--text)] uppercase tracking-wide mb-3">Key Points</h3>
                 <ul className="space-y-2">
                   {currentSlide.content.map((point, i) => (
                     <li key={i} className="flex items-start space-x-2">
                       <div className="w-1.5 h-1.5 rounded-full mt-2 flex-shrink-0" style={{ background: CARD_PALETTE[0].accent }}></div>
-                      <span className="text-xs text-gray-700 leading-relaxed">{point}</span>
+                      <span className="text-xs text-[var(--muted)] leading-relaxed">{point}</span>
                     </li>
                   ))}
             </ul>
@@ -213,12 +213,12 @@ export default function SlidePreview({ slides, isLoading, zoom = 1, optimizedSto
                 {currentSlide.frameworks && currentSlide.frameworks.length > 0 ? (
                   <div className="space-y-3">
                     {currentSlide.frameworks.map((framework, idx) => (
-                      <div key={idx} className="bg-white border border-gray-200 rounded p-2">
+                      <div key={idx} className="bg-gray-800 border border-gray-700 rounded p-2">
                         <div className="flex items-center space-x-2 mb-1">
                           <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: palette && palette[0] ? palette[0] : '#2563eb' }}></div>
-                          <span className="text-xs font-semibold text-gray-800">{framework}</span>
+                              <span className="text-xs font-semibold text-[var(--text)]">{framework}</span>
                         </div>
-                        <p className="text-xs text-gray-600 ml-4">
+                            <p className="text-xs text-[var(--muted)] ml-4">
                           {framework === "SWOT Analysis" && "Strengths, Weaknesses, Opportunities, Threats"}
                           {framework === "Porter's Five Forces" && "Competitive rivalry, Supplier power, Buyer power, Threat of substitution, Threat of new entry"}
                           {framework === "BCG Matrix" && "Stars, Cash Cows, Question Marks, Dogs"}

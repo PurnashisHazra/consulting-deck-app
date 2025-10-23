@@ -832,7 +832,7 @@ async def generate_slides(request: SlideRequest, authorization: str = Header(Non
         # find the inserted deck id and update summary
         inserted = await decks_collection.find_one({"email": user_email, "created_at": deck_doc["created_at"]})
         if inserted:
-            console.log("Inserted deck I_D:", inserted.get("_id"))
+            print("Inserted deck ID:", inserted.get("_id"))
             summary["deck_id"] = str(inserted.get("_id"))
         if user_email:
             await users_collection.update_one({"email": user_email}, {"$push": {"saved_decks": summary}})
@@ -1019,3 +1019,48 @@ async def get_palette():
     except Exception as e:
         print("/palette error:", e)
         return sanitize_for_json(fallback)
+
+
+@app.post("/enrich_problem")
+async def enrich_problem(payload: dict, authorization: str = Header(None)):
+    """Return an enriched problem statement plus extracted data points and sources.
+    payload expected: {"problem": "...", "answers": [...] }
+    """
+    problem = payload.get("problem") if isinstance(payload, dict) else None
+    answers = payload.get("answers") if isinstance(payload, dict) else None
+    if not problem:
+        return {"error": "Missing problem text"}
+    prompt = f"""
+    You are a helpful analyst. Given the following problem statement and optional user answers, produce a JSON object with keys:
+    - enriched: a polished, expanded problem statement suitable for generating slides (2-4 short paragraphs)
+    - data: an array of extracted or inferred data points or metrics (each item should be a dict with label and value when appropriate)
+    - sources: an array of strings listing plausible sources for the data (URLs or dataset names)
+
+    Input problem:
+    {problem}
+
+    User answers (if any):
+    {answers}
+
+    Return only valid JSON. Keep content concise and actionable.
+    """
+    try:
+        completion = openai_client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": "You are a concise analyst. Return only JSON."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+        )
+        content = completion.choices[0].message.content
+        try:
+            repaired = repair_json(content)
+            parsed = json.loads(repaired)
+        except Exception:
+            # Fallback: try to extract fields heuristically
+            parsed = {"enriched": content, "data": [], "sources": []}
+        return sanitize_for_json(parsed)
+    except Exception as e:
+        print('/enrich_problem error:', e)
+        return {"error": str(e)}

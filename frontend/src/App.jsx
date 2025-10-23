@@ -3,6 +3,7 @@ import { useState, useEffect, createContext, useContext } from "react";
 import SlideForm from "./components/SlideForm";
 import SlidePreview from "./components/SlidePreview";
 import CanvasSlidePreview from "./components/CanvasSlidePreview";
+import ProblemEnrichModal from "./components/ProblemEnrichModal";
 import { generateSlides, API_BASE_URL, fetchSavedDecks, saveDeck } from "./api";
 import LoginSignup from "./components/LoginSignup";
 import HomePage from "./components/HomePage";
@@ -526,6 +527,24 @@ function App() {
     };
 
   const handleSubmit = async (payload) => {
+    // If problem statement is short (<100 words), ask user to enrich it first
+    const wordCount = payload.problem_statement ? payload.problem_statement.trim().split(/\s+/).filter(Boolean).length : 0;
+    if (wordCount > 0 && wordCount < 100) {
+      // open modal and wait for user action
+      const enriched = await new Promise((resolve) => {
+        // capture latest form problem (SlideForm writes window._latestSlideForm before submit)
+        const latest = (typeof window !== 'undefined' && window._latestSlideForm) ? window._latestSlideForm : null;
+        setModalProblem(latest ? (latest.problem_statement || '') : payload.problem_statement || '');
+        // show modal and resolve when closed
+        setModalOpen(true);
+        window._resolveEnrich = (val) => { resolve(val); setModalOpen(false); delete window._resolveEnrich; };
+      });
+      if (enriched) {
+        payload.problem_statement = enriched;
+      } else {
+        // user cancelled enrichment
+      }
+    }
     setIsLoading(true);
     try {
       // Check if user has at least 1 coin before generating slides
@@ -594,6 +613,10 @@ function App() {
     }
   }
 
+  // modal state for problem enrichment
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalProblem, setModalProblem] = useState('');
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
       {/* Header */}
@@ -610,6 +633,13 @@ function App() {
         </div>
       </div> */}
     <Toaster />
+  <ProblemEnrichModal open={modalOpen} initialProblem={modalProblem} onClose={(val) => {
+        // resolve the enrichment promise if present on window
+        if (typeof window !== 'undefined' && window._resolveEnrich) {
+          window._resolveEnrich(val);
+        }
+        setModalOpen(false);
+    }} />
 
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
