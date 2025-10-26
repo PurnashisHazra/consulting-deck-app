@@ -18,12 +18,20 @@ const LoginSignup = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false); // Loader state
+  const [progressStages, setProgressStages] = useState([]);
+  const [currentStageIndex, setCurrentStageIndex] = useState(-1);
   const navigate = useNavigate();
   const { setIsAuthenticated, setToken } = useContext(AuthContext);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     const endpoint = isLogin ? '/auth/login' : '/auth/signup';
+    // Define staged progress depending on login vs signup
+    const stages = isLogin
+      ? ['Verifying credentials', 'Loading interface', 'Loading Deck Generator']
+      : ['Creating profile', 'Loading interface', 'Loading Deck Generator'];
+    setProgressStages(stages);
+    setCurrentStageIndex(0);
     setIsLoading(true);
     try {
       const response = await axios.post(`${API_BASE_URL}${endpoint}`, {
@@ -32,12 +40,18 @@ const LoginSignup = () => {
       });
       setToken(response.data.access_token);
       setIsAuthenticated(true);
-      setTimeout(() => {
-        setIsLoading(false);
-        navigate('/deck-generator');
-      }, 1000);
+      // Advance progress quickly — keep it responsive while avoiding artificial long waits
+      setCurrentStageIndex(1);
+      // Allow UI to render the intermediate stage briefly (micro-wait)
+      await new Promise((r) => setTimeout(r, 120));
+      setCurrentStageIndex(2);
+      // Finalize and navigate once interface is ready
+      setIsLoading(false);
+      navigate('/deck-generator');
     } catch (error) {
       setIsLoading(false);
+      setProgressStages([]);
+      setCurrentStageIndex(-1);
       alert(error.response?.data?.detail || 'An error occurred');
     }
   };
@@ -50,23 +64,36 @@ const LoginSignup = () => {
       /* no-op, script loads automatically */
     };
     const timer = setTimeout(() => {
+      const clientId = process.env.REACT_APP_GOOGLE_CLIENT_ID;
+      if (!clientId) {
+        console.warn('Google client ID is not set. Set REACT_APP_GOOGLE_CLIENT_ID in frontend/.env to enable Google Sign-In.');
+        return;
+      }
       if (window.google && window.google.accounts && googleBtnRef.current) {
-        window.google.accounts.id.initialize({
-          client_id: process.env.REACT_APP_GOOGLE_CLIENT_ID,
-          callback: handleGoogleResponse,
-        });
-        window.google.accounts.id.renderButton(googleBtnRef.current, {
-          theme: 'outline',
-          size: 'large',
-          text: 'continue_with',
-          shape: 'rectangular',
-        });
+        try {
+          window.google.accounts.id.initialize({
+            client_id: clientId,
+            callback: handleGoogleResponse,
+          });
+          window.google.accounts.id.renderButton(googleBtnRef.current, {
+            theme: 'outline',
+            size: 'large',
+            text: 'continue_with',
+            shape: 'rectangular',
+          });
+        } catch (e) {
+          console.error('Failed to initialize Google Identity Services:', e);
+        }
       }
     }, 500);
     return () => clearTimeout(timer);
   }, []);
 
   const handleGoogleResponse = async (response) => {
+    // Staged loader for Google flow
+    const stages = ['Verifying Google account', 'Loading interface', 'Loading Deck Generator'];
+    setProgressStages(stages);
+    setCurrentStageIndex(0);
     setIsLoading(true);
     try {
       // Send ID token to backend for verification and JWT
@@ -75,12 +102,15 @@ const LoginSignup = () => {
       });
       setToken(res.data.access_token);
       setIsAuthenticated(true);
-      setTimeout(() => {
-        setIsLoading(false);
-        navigate('/deck-generator');
-      }, 1000);
+      setCurrentStageIndex(1);
+      await new Promise((r) => setTimeout(r, 120));
+      setCurrentStageIndex(2);
+      setIsLoading(false);
+      navigate('/deck-generator');
     } catch (err) {
       setIsLoading(false);
+      setProgressStages([]);
+      setCurrentStageIndex(-1);
       alert('Google login failed');
     }
   };
@@ -89,7 +119,29 @@ const LoginSignup = () => {
     <div className="max-w-md mx-auto bg-white p-6 rounded-lg shadow-md">
       {isLoading ? (
         <div className="text-center">
-          <p className="text-lg font-bold">Loading...</p>
+          <p className="text-lg font-bold mb-2">Getting you ready...</p>
+          <div className="w-full bg-gray-200 rounded h-3 overflow-hidden mb-3">
+            <div
+              className="h-3 bg-blue-600"
+              style={{ width: `${Math.max(0, Math.min(100, ((currentStageIndex + 1) / Math.max(1, progressStages.length)) * 100))}%`, transition: 'width 180ms linear' }}
+            />
+          </div>
+          <div className="text-left text-sm">
+            {progressStages && progressStages.length > 0 ? (
+              <ul className="space-y-2">
+                {progressStages.map((s, i) => (
+                  <li key={i} className="flex items-center">
+                    <span className={`w-5 h-5 inline-flex items-center justify-center rounded-full mr-2 ${i <= currentStageIndex ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-600'}`}>
+                      {i < currentStageIndex ? '✓' : (i === currentStageIndex ? (<svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="white" strokeWidth="3" fill="none" strokeLinecap="round" strokeDasharray="31.4" strokeDashoffset="0"></circle></svg>) : i+1)}
+                    </span>
+                    <span className={i <= currentStageIndex ? 'text-gray-800 font-medium' : 'text-gray-600'}>{s}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-gray-600">Loading…</p>
+            )}
+          </div>
         </div>
       ) : (
         <>
@@ -108,6 +160,9 @@ const LoginSignup = () => {
                 padding: '0',
               }}
             />
+            {!process.env.REACT_APP_GOOGLE_CLIENT_ID && (
+              <p className="text-sm text-yellow-600 mt-2 text-center">Google Sign-In is not configured. Please set <code>REACT_APP_GOOGLE_CLIENT_ID</code> in <code>frontend/.env</code>.</p>
+            )}
           </div>
           {/* Divider */}
           <div className="flex items-center my-4">

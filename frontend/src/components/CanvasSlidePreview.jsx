@@ -5,6 +5,7 @@ import ChartRenderer from "./ChartRenderer";
 import { getPalette } from '../api';
 import SmartArtFlow from "./SmartArtFlow";
 import { readableTextOnAlphaBg, ensureHex, readableTextColor, blendWithWhite, rgbToHex } from '../utils/colorUtils';
+import { ENABLE_INLINE_EDITING } from '../config';
 
 // Accept setCurrentSlideIndex as a prop for navigation
 export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex = 0, setCurrentSlideIndex, optimizedStoryline, onGenerateMockSlides }) {
@@ -38,6 +39,9 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
   };
   // Store canvas state for each slide
   const [slideCanvasState, setSlideCanvasState] = useState({});
+  // Editing helpers: temporary values for inline editing per item id
+  const [editingMap, setEditingMap] = useState({}); // { [id]: true }
+  const [editingValues, setEditingValues] = useState({}); // { [id]: string }
 
   // Full screen toggle state
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -392,6 +396,79 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
     );
     document.body.style.cursor = "nwse-resize";
   };
+
+  // Start editing an item (prefill editingValues based on type)
+  const startEditItem = (id) => {
+    const item = canvasItems.find(it => it.id === id);
+    if (!item) return;
+    let initial = '';
+    try {
+      if (item.type === 'chart') {
+        initial = JSON.stringify(item.chartData || item.data || {}, null, 2);
+      } else if (item.type === 'frameworks') {
+        initial = JSON.stringify(item.frameworkData || item.data || {}, null, 2);
+      } else if (typeof item.data === 'object') {
+        initial = JSON.stringify(item.data, null, 2);
+      } else if (Array.isArray(item.data)) {
+        initial = item.data.join('\n');
+      } else {
+        initial = String(item.data || '');
+      }
+    } catch (err) {
+      initial = String(item.data || '');
+    }
+    setEditingValues(prev => ({ ...prev, [id]: initial }));
+    setEditingMap(prev => ({ ...prev, [id]: true }));
+  };
+
+  const cancelEditItem = (id) => {
+    setEditingMap(prev => { const n = { ...prev }; delete n[id]; return n; });
+    setEditingValues(prev => { const n = { ...prev }; delete n[id]; return n; });
+  };
+
+  const onEditChange = (id, v) => {
+    setEditingValues(prev => ({ ...prev, [id]: v }));
+  };
+
+  const saveEditItem = (id) => {
+    const raw = (editingValues[id] || '').trim();
+    setCanvasItems(items => items.map(item => {
+      if (item.id !== id) return item;
+      try {
+        if (item.type === 'chart') {
+          const parsed = raw ? JSON.parse(raw) : {};
+          return { ...item, chartData: parsed, data: parsed };
+        } else if (item.type === 'frameworks') {
+          const parsed = raw ? JSON.parse(raw) : {};
+          // try to keep framework list in item.data if keys exist
+          return { ...item, frameworkData: parsed };
+        } else if (item.type === 'takeaway' && typeof item.data === 'object') {
+          // For takeaway, if JSON provided parse, else split lines into object
+          if (raw.startsWith('{') || raw.startsWith('[')) {
+            const parsed = JSON.parse(raw);
+            return { ...item, data: parsed };
+          } else {
+            const lines = raw.split('\n').map(s => s.trim()).filter(Boolean);
+            const takeaway = lines[0] || '';
+            const call_to_action = lines[1] || '';
+            return { ...item, data: { takeaway, call_to_action } };
+          }
+        } else {
+          // Generic: try JSON parse, otherwise set string or array
+          if (raw.startsWith('{') || raw.startsWith('[')) {
+            const parsed = JSON.parse(raw);
+            return { ...item, data: parsed };
+          }
+          const lines = raw.split('\n').map(s => s.trim()).filter(Boolean);
+          return { ...item, data: lines.length > 1 ? lines : raw };
+        }
+      } catch (err) {
+        window.alert('Failed to parse edited value. Please ensure JSON is valid for charts/frameworks. ' + err.message);
+        return item;
+      }
+    }));
+    cancelEditItem(id);
+  };
   // Throttle resize updates using requestAnimationFrame to avoid layout thrash / ResizeObserver loops
   const resizePendingRef = useRef(null);
   const resizeScheduledRef = useRef(false);
@@ -626,6 +703,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
               >
                 <div
                   className="border rounded shadow p-4 h-full w-full flex flex-col relative group"
+                  onDoubleClick={() => { if (ENABLE_INLINE_EDITING) startEditItem(item.id); }}
                     style={{
                     boxSizing: "border-box",
                     overflow: "hidden",
@@ -638,13 +716,37 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                     transition: 'transform 0.12s ease, box-shadow 0.12s ease',
                   }}
                 >
-                  <button
-                    className="absolute top-2 right-2 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto"
-                    onClick={() => handleDelete(item.id)}
-                    aria-label="Delete section"
-                  >
-                    ✕
-                  </button>
+                    <div className="absolute top-2 right-2 flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto">
+                    {/* Show a small badge when editing is disabled, but always allow deletion */}
+                    {!ENABLE_INLINE_EDITING && (
+                      <div className="text-xs text-gray-500 bg-white px-2 py-1 rounded shadow">Editing disabled</div>
+                    )}
+                    {/* Edit / Save / Cancel buttons only when inline editing is enabled */}
+                    {ENABLE_INLINE_EDITING && !editingMap[item.id] && (
+                      <button
+                        className="text-sm text-gray-600 bg-white px-2 py-1 rounded shadow"
+                        onClick={() => startEditItem(item.id)}
+                      >Edit</button>
+                    )}
+                    {ENABLE_INLINE_EDITING && editingMap[item.id] && (
+                      <>
+                        <button
+                          className="text-sm text-green-600 bg-white px-2 py-1 rounded shadow"
+                          onClick={() => saveEditItem(item.id)}
+                        >Save</button>
+                        <button
+                          className="text-sm text-gray-600 bg-white px-2 py-1 rounded shadow"
+                          onClick={() => cancelEditItem(item.id)}
+                        >Cancel</button>
+                      </>
+                    )}
+                    {/* Delete is always available */}
+                    <button
+                      className="text-red-500 text-sm bg-white px-2 py-1 rounded shadow"
+                      onClick={() => handleDelete(item.id)}
+                      aria-label="Delete section"
+                    >✕</button>
+                  </div>
                   {/* Resize handle */}
                   <div
                     className="absolute bottom-1 right-1 w-4 h-4 bg-blue-400 rounded cursor-nwse-resize flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto"
@@ -658,102 +760,197 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                     <ResizeListener id={item.id} onResize={handleResize} onResizeEnd={handleResizeEnd} />
                   )}
                   {/* Render section content based on type, fallback to raw content */}
-                  {item.type === "chart" && (
-                    (() => {
-                      // Use section.charts and section.chart_data for each section
-                      const chartTypes = Array.isArray(item.charts) ? item.charts : (item.chartType ? [item.chartType] : []);
-                      return chartTypes.length > 0 ? (
+                  {editingMap[item.id] && item.type === 'frameworks' ? (
+                      <div className="flex-1 w-full overflow-auto">
+                        {(() => {
+                          const fwData = item.frameworkData || item.data || {};
+                          let parsed;
+                          try { parsed = editingValues[item.id] ? JSON.parse(editingValues[item.id]) : fwData; } catch (e) { parsed = fwData; }
+                          const keys = Object.keys(parsed || {});
+                          return (
+                            <div>
+                              <table className="min-w-[200px] w-full border rounded text-xs" style={{ borderColor: '#e5e7eb' }}>
+                                <thead>
+                                  <tr>
+                                    {keys.map((key) => (
+                                      <th key={key} className="border px-2 py-1 font-semibold bg-gray-50">{key}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <tr>
+                                    {keys.map((k) => (
+                                      <td key={k} className="border px-2 py-1 align-top">
+                                        <textarea
+                                          value={Array.isArray(parsed[k]) ? parsed[k].join('\n') : String(parsed[k] || '')}
+                                          onChange={(e) => {
+                                            const v = e.target.value.split('\n').map(s => s.trim()).filter(Boolean);
+                                            const next = { ...parsed, [k]: v };
+                                            setEditingValues(prev => ({ ...prev, [item.id]: JSON.stringify(next, null, 2) }));
+                                          }}
+                                          className="w-full h-24 p-1 border border-gray-200 rounded text-sm"
+                                        />
+                                      </td>
+                                    ))}
+                                  </tr>
+                                </tbody>
+                              </table>
+                              <div className="mt-2 flex space-x-2">
+                                <button onClick={() => saveEditItem(item.id)} className="px-3 py-1 bg-green-600 text-white rounded">Save</button>
+                                <button onClick={() => cancelEditItem(item.id)} className="px-3 py-1 bg-gray-100 rounded">Cancel</button>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    ) : (
+                    <>
+                      {item.type === "chart" && (
+                        (() => {
+                          // Use section.charts and section.chart_data for each section
+                          const chartTypes = Array.isArray(item.charts) ? item.charts : (item.chartType ? [item.chartType] : []);
+                          return chartTypes.length > 0 ? (
+                            <>
+                              <h4 className="font-bold mb-2">Chart</h4>
+                              <div className="flex-1 flex items-center justify-center">
+                                {chartTypes.map((chartType, idx) => {
+                                  // Always pass the full chart object for each chart type
+                                  const chartDataObj = item.chart_data && item.chart_data[chartType];
+                                  const chartData = chartDataObj || item.chartData || {};
+                                  return (
+                                    <ChartRenderer
+                                      key={chartType + idx}
+                                      type={chartType}
+                                      data={chartData}
+                                      xAxisTitle={chartData.xAxisTitle}
+                                      yAxisTitle={chartData.yAxisTitle}
+                                      legend={chartData.legend}
+                                      inferences={chartData.inferences}
+                                      palette={ (remotePalette && remotePalette.length>0) ? remotePalette : CARD_PALETTE.map(p => p.accent) }
+                                    />
+                                  );
+                                })}
+                              </div>
+                            </>
+                          ) : null;
+                        })()
+                      )}
+                      {item.type === "frameworks" && (
+
                         <>
-                          <h4 className="font-bold mb-2">Chart</h4>
-                          <div className="flex-1 flex items-center justify-center">
-                            {chartTypes.map((chartType, idx) => {
-                              // Always pass the full chart object for each chart type
-                              const chartDataObj = item.chart_data && item.chart_data[chartType];
-                              const chartData = chartDataObj || item.chartData || {};
-                              return (
-                                <ChartRenderer
-                                  key={chartType + idx}
-                                  type={chartType}
-                                  data={chartData}
-                                  xAxisTitle={chartData.xAxisTitle}
-                                  yAxisTitle={chartData.yAxisTitle}
-                                  legend={chartData.legend}
-                                  inferences={chartData.inferences}
-                                  palette={ (remotePalette && remotePalette.length>0) ? remotePalette : CARD_PALETTE.map(p => p.accent) }
-                                />
-                              );
-                            })}
+                          <h4 className="font-bold mb-2">Frameworks</h4>
+                          <div className="flex-1 overflow-auto">
+                            {item.data && item.data.length > 0 ? (
+                              // filter out falsy/null framework entries
+                              item.data.filter(Boolean).map((fw, idx) => (
+                                <div key={idx} className="mb-2">
+                                  <div className="font-semibold text-xs mb-1">{fw || 'Framework'}</div>
+                                  {
+                                    (() => {
+                                      const sectionAccent = (remotePalette && remotePalette.length > 0)
+                                        ? remotePalette[idx % remotePalette.length]
+                                        : CARD_PALETTE[idx % CARD_PALETTE.length].accent;
+                                      const fallbackPalette = (remotePalette && remotePalette.length>0) ? remotePalette : CARD_PALETTE.map(p => p.accent);
+                                      const paletteForFramework = [sectionAccent, ...fallbackPalette.filter(p => p !== sectionAccent)];
+                                      return (
+                                        <FrameworkDiagram
+                                          framework={fw}
+                                          frameworkData={item.frameworkData && item.frameworkData[fw] ? item.frameworkData[fw] : undefined}
+                                          palette={paletteForFramework}
+                                        />
+                                      );
+                                    })()
+                                  }
+                                </div>
+                              ))
+                            ) : (
+                              <span className="text-xs text-gray-500">No frameworks</span>
+                            )}
                           </div>
                         </>
-                      ) : null;
-                    })()
-                  )}
-                  {item.type === "frameworks" && (
-
-                    <>
-                      <h4 className="font-bold mb-2">Frameworks</h4>
-                      <div className="flex-1 overflow-auto">
-                        {item.data && item.data.length > 0 ? (
-                          // filter out falsy/null framework entries
-                          item.data.filter(Boolean).map((fw, idx) => (
-                            <div key={idx} className="mb-2">
-                              <div className="font-semibold text-xs mb-1">{fw || 'Framework'}</div>
-                {
-                  (() => {
-                    const sectionAccent = (remotePalette && remotePalette.length > 0)
-                      ? remotePalette[idx % remotePalette.length]
-                      : CARD_PALETTE[idx % CARD_PALETTE.length].accent;
-                    const fallbackPalette = (remotePalette && remotePalette.length>0) ? remotePalette : CARD_PALETTE.map(p => p.accent);
-                    const paletteForFramework = [sectionAccent, ...fallbackPalette.filter(p => p !== sectionAccent)];
-                    return (
-                      <FrameworkDiagram
-                        framework={fw}
-                        frameworkData={item.frameworkData && item.frameworkData[fw] ? item.frameworkData[fw] : undefined}
-                        palette={paletteForFramework}
-                      />
-                    );
-                  })()
-                }
+                      )}
+                      {item.type === "keyPoints" && (
+                        <>
+                          <h4 className="font-bold mb-2">Key Points</h4>
+                          <div className="flex-1 overflow-auto">
+                            {editingMap[item.id] ? (
+                              (() => {
+                                const raw = editingValues[item.id] || (Array.isArray(item.data) ? item.data.join('\n') : String(item.data || ''));
+                                const lines = raw.split('\n').map(s=>s.trim()).filter(Boolean);
+                                return (
+                                  <div className="flex flex-col gap-2">
+                                    {lines.map((line, li) => (
+                                      <textarea key={li} value={line} onChange={(e)=>{
+                                        const copy = lines.slice(); copy[li] = e.target.value; setEditingValues(prev=>({ ...prev, [item.id]: copy.join('\n') }));
+                                      }} className="w-full p-2 border border-gray-200 rounded text-sm" />
+                                    ))}
+                                    <button type="button" onClick={()=>{ const copy = lines.slice(); copy.push(''); setEditingValues(prev=>({ ...prev, [item.id]: copy.join('\n') })); }} className="text-sm text-blue-600">Add point</button>
+                                  </div>
+                                );
+                              })()
+                            ) : (
+                              <ul className="list-disc ml-4 flex-1 overflow-auto">
+                                {Array.isArray(item.data) ? item.data.map((point, i) => (
+                                  <li key={i} className="text-xs text-gray-700">{point}</li>
+                                )) : <li className="text-xs text-gray-700">{item.data}</li>}
+                              </ul>
+                            )}
+                          </div>
+                        </>
+                      )}
+                      {item.type === "takeaway" && (
+                        <div className="grid grid-cols-2 gap-4 h-full w-full">
+                            <div className="p-3 overflow-auto" style={{ background: CARD_PALETTE[0].bg, borderLeft: `6px solid ${CARD_PALETTE[0].accent}` }}>
+                              <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[0].accent), 0.12) }}>Key Insight</h4>
+                              {editingMap[item.id] ? (
+                                <textarea value={(editingValues[item.id] ? (()=>{ try{ const parsed=JSON.parse(editingValues[item.id]); return parsed.takeaway || ''; }catch(e){ return item.data.takeaway || '' } })() : (item.data.takeaway || ''))} onChange={(e)=>{ const raw = editingValues[item.id] || JSON.stringify(item.data); try{ const parsed = JSON.parse(raw); parsed.takeaway = e.target.value; setEditingValues(prev=>({ ...prev, [item.id]: JSON.stringify(parsed, null, 2) })); }catch(err){ const next = { ...(item.data||{}), takeaway: e.target.value }; setEditingValues(prev=>({ ...prev, [item.id]: JSON.stringify(next, null, 2) })); } }} className="w-full p-2 border border-transparent rounded bg-white text-sm" />
+                              ) : (
+                                <p className="text-sm" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[0].accent), 0.12) }}>{item.data.takeaway}</p>
+                              )}
                             </div>
-                          ))
-                        ) : (
-                          <span className="text-xs text-gray-500">No frameworks</span>
-                        )}
-                      </div>
+                            <div className="p-3 overflow-auto" style={{ background: CARD_PALETTE[1].bg, borderLeft: `6px solid ${CARD_PALETTE[1].accent}` }}>
+                              <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[1].accent), 0.12) }}>Next Steps</h4>
+                              {editingMap[item.id] ? (
+                                <textarea value={(editingValues[item.id] ? (()=>{ try{ const parsed=JSON.parse(editingValues[item.id]); return parsed.call_to_action || ''; }catch(e){ return item.data.call_to_action || '' } })() : (item.data.call_to_action || ''))} onChange={(e)=>{ const raw = editingValues[item.id] || JSON.stringify(item.data); try{ const parsed = JSON.parse(raw); parsed.call_to_action = e.target.value; setEditingValues(prev=>({ ...prev, [item.id]: JSON.stringify(parsed, null, 2) })); }catch(err){ const next = { ...(item.data||{}), call_to_action: e.target.value }; setEditingValues(prev=>({ ...prev, [item.id]: JSON.stringify(next, null, 2) })); } }} className="w-full p-2 border border-transparent rounded bg-white text-sm" />
+                              ) : (
+                                <p className="text-sm" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[1].accent), 0.12) }}>{item.data.call_to_action}</p>
+                              )}
+                            </div>
+                        </div>
+                      )}
                     </>
                   )}
-                  {item.type === "keyPoints" && (
-                    <>
-                      <h4 className="font-bold mb-2">Key Points</h4>
-                      <ul className="list-disc ml-4 flex-1 overflow-auto">
-                        {Array.isArray(item.data) ? item.data.map((point, i) => (
-                          <li key={i} className="text-xs text-gray-700">{point}</li>
-                        )) : <li className="text-xs text-gray-700">{item.data}</li>}
-                      </ul>
-                    </>
-                  )}
-                  {item.type === "takeaway" && (
-                    <div className="grid grid-cols-2 gap-4 h-full w-full">
-                        <div className="p-3 overflow-auto" style={{ background: CARD_PALETTE[0].bg, borderLeft: `6px solid ${CARD_PALETTE[0].accent}` }}>
-                          <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[0].accent), 0.12) }}>Key Insight</h4>
-                          <p className="text-sm" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[0].accent), 0.12) }}>{item.data.takeaway}</p>
-                        </div>
-                        <div className="p-3 overflow-auto" style={{ background: CARD_PALETTE[1].bg, borderLeft: `6px solid ${CARD_PALETTE[1].accent}` }}>
-                          <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[1].accent), 0.12) }}>Next Steps</h4>
-                          <p className="text-sm" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[1].accent), 0.12) }}>{item.data.call_to_action}</p>
-                        </div>
-                    </div>
-                  )}
-                  {/* Card format for custom/unknown types and new AI sections */}
                   {!["chart", "frameworks", "keyPoints", "takeaway"].includes(item.type) && (
                     <div className="rounded-xl border border-gray-200 p-4 shadow-sm flex-1 flex flex-col items-start overflow-auto" style={{ background: 'rgba(255,255,255,1)', justifyContent: 'flex-start', minHeight: 0 }}>
                       {/* Section Title */}
                       <div className="mb-4 w-full">
                         <h3 className="text-base font-bold text-gray-800 uppercase tracking-wide mb-3">{item.title || item.type || "SECTION"}</h3>
                         {(() => {
+                          if (editingMap[item.id]) {
+                            // Inline editing for generic data
+                            if (Array.isArray(item.data)) {
+                              const raw = editingValues[item.id] || item.data.join('\n');
+                              const lines = raw.split('\n').map(s=>s.trim()).filter(Boolean);
+                              return (
+                                <div className="flex flex-col gap-2">
+                                  {lines.map((ln, i) => (
+                                    <textarea key={i} value={ln} onChange={(e)=>{ const copy = lines.slice(); copy[i]=e.target.value; setEditingValues(prev=>({ ...prev, [item.id]: copy.join('\n') })); }} className="w-full p-2 border border-gray-200 rounded text-sm" />
+                                  ))}
+                                  <button type="button" onClick={()=>{ const copy = lines.slice(); copy.push(''); setEditingValues(prev=>({ ...prev, [item.id]: copy.join('\n') })); }} className="text-sm text-blue-600">Add line</button>
+                                </div>
+                              );
+                            } else if (typeof item.data === 'object' && item.data !== null) {
+                              const raw = editingValues[item.id] || JSON.stringify(item.data, null, 2);
+                              return <textarea value={raw} onChange={(e)=>setEditingValues(prev=>({ ...prev, [item.id]: e.target.value }))} className="w-full p-2 border border-gray-200 rounded text-sm font-mono" />;
+                            } else {
+                              const raw = editingValues[item.id] || String(item.data || '');
+                              return <input value={raw} onChange={(e)=>setEditingValues(prev=>({ ...prev, [item.id]: e.target.value }))} className="w-full p-2 border border-gray-200 rounded text-sm" />;
+                            }
+                          }
+                          // non-editing render
                           if (Array.isArray(item.data)) {
                             // Array: show as SmartArt flowchart
-                            return <SmartArtFlow items={item.data} palette={ [ (remotePalette && remotePalette.length>0) ? remotePalette[idx % remotePalette.length] : CARD_PALETTE[idx % CARD_PALETTE.length].accent ] } />;
+                            return <SmartArtFlow items={item.data} palette={ (remotePalette && remotePalette.length>0) ? remotePalette : CARD_PALETTE.map(p=>p.accent) } />;
                           } else if (typeof item.data === 'object' && item.data !== null) {
                             // Object: pretty JSON, no bullet
                             return (
