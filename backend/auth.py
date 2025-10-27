@@ -37,6 +37,36 @@ async def google_callback(request: Request):
         await users_collection.insert_one(new_user)
     access_token = create_access_token(data={"sub": email})
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post("/google/callback")
+async def google_callback_post(body: dict = Body(...)):
+    """Accepts an ID token from Google Identity Services (frontend), verifies it,
+    creates the user if missing, and returns a JWT access token.
+    This endpoint is designed for the client-side One Tap / Sign-in flow where
+    the client sends the id_token to the backend via POST.
+    """
+    # Accept common keys that frontend may send
+    idtoken = body.get("id_token") or body.get("idtoken") or body.get("credential") or body.get("idToken")
+    if not idtoken:
+        raise HTTPException(status_code=400, detail="Missing id_token in request body")
+    try:
+        idinfo = id_token.verify_oauth2_token(idtoken, google.auth.transport.requests.Request(), GOOGLE_CLIENT_ID)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid ID token")
+
+    email = idinfo.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="Google account has no email")
+
+    db_user = await users_collection.find_one({"email": email})
+    if not db_user:
+        # Signup: create user with Google
+        new_user = {"username": email, "email": email, "google": True, "coins": 10, "saved_decks": []}
+        await users_collection.insert_one(new_user)
+
+    access_token = create_access_token(data={"sub": email})
+    return {"access_token": access_token, "token_type": "bearer"}
 from pydantic import BaseModel
 from passlib.hash import sha256_crypt, bcrypt
 import jwt as pyjwt
