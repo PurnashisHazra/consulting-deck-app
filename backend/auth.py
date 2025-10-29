@@ -68,7 +68,7 @@ async def google_callback_post(body: dict = Body(...)):
     access_token = create_access_token(data={"sub": email})
     return {"access_token": access_token, "token_type": "bearer"}
 from pydantic import BaseModel
-from passlib.hash import sha256_crypt
+from passlib.hash import sha256_crypt, bcrypt
 import jwt as pyjwt
 from datetime import datetime, timedelta
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -104,7 +104,9 @@ class Token(BaseModel):
 def get_password_hash(password):
     return sha256_crypt.hash(password)
 
-def verify_password(plain_password, hashed_password):
+def verify_password(plain_password, hashed_password, use_bcrypt=False):
+    if use_bcrypt:
+        return bcrypt.verify(plain_password, hashed_password)
     return sha256_crypt.verify(plain_password, hashed_password)
 
 def create_access_token(data: dict):
@@ -140,7 +142,8 @@ async def signup(user: UserCreate):
 @router.post("/login", response_model=Token)
 async def login(user: UserLogin):
     db_user = await users_collection.find_one({"email": user.email})
-    if not db_user or not verify_password(user.password, db_user["password"]):
+    use_bcrypt = db_user and db_user.get("old") == "yes"
+    if not db_user or not verify_password(user.password, db_user["password"], use_bcrypt=use_bcrypt):
         raise HTTPException(status_code=400, detail="Invalid credentials")
     access_token = create_access_token(data={"sub": db_user["email"]})
     return {"access_token": access_token, "token_type": "bearer"}
