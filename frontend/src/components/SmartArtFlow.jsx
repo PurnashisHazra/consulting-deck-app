@@ -1,4 +1,5 @@
 import React from 'react';
+import { parseListItems } from '../utils/parseList';
 
 // Simple SmartArt: render items as stacked boxes with bullet lists when appropriate.
 export default function SmartArtFlow({ items = [], numberOfNodes, gridHeight, palette }) {
@@ -39,7 +40,7 @@ export default function SmartArtFlow({ items = [], numberOfNodes, gridHeight, pa
                 // Split long strings into bullet-like lines if multiple sentences or newlines
                 (() => {
                   if (typeof item === 'string') {
-                    const parts = item.split(/\n|\.|;|\u2022/).map(s => s.trim()).filter(Boolean);
+                    const parts = parseListItems(item);
                     if (parts.length > 1) {
                       return (
                         <ul className="list-disc pl-5 text-sm" style={{ color: '#111827' }}>

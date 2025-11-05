@@ -2,9 +2,11 @@ import { useState, useEffect, useRef } from "react";
 import Draggable from "react-draggable";
 import FrameworkDiagram from "./FrameworkDiagram";
 import ChartRenderer from "./ChartRenderer";
-import { getPalette } from '../api';
+import { getPalette, API_BASE_URL } from '../api';
 import SmartArtFlow from "./SmartArtFlow";
 import { readableTextOnAlphaBg, ensureHex, readableTextColor, blendWithWhite, rgbToHex } from '../utils/colorUtils';
+import EnrichConfirmModal from './EnrichConfirmModal';
+import { parseListItems } from '../utils/parseList';
 import { ENABLE_INLINE_EDITING } from '../config';
 
 // Accept setCurrentSlideIndex as a prop for navigation
@@ -61,6 +63,8 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
   ];
 
   const [remotePalette, setRemotePalette] = useState(null);
+  const [isEnriching, setIsEnriching] = useState({});
+  const [enrichModal, setEnrichModal] = useState({ open: false, itemId: null, bullets: [] });
 
   // Blend fraction for creating solid pastel backgrounds from accent colors.
   // Can be overridden with environment variable REACT_APP_CARD_BLEND (e.g., 0.08 or 0.18).
@@ -245,8 +249,8 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
         if (Array.isArray(content)) {
           dataForRender = content.slice();
         } else if (typeof content === 'string') {
-          // Split into sentences/lines for bullets
-          const parts = content.split(/\n|\.|;|\u2022|\r/).map(s => s.trim()).filter(Boolean);
+          // Split into list items but preserve numbered prefixes like "1. ..."
+          const parts = parseListItems(content);
           if (parts.length >= targetPoints) {
             dataForRender = parts;
           } else {
@@ -258,14 +262,14 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                 if (candidate && !dataForRender.includes(candidate)) dataForRender.push(candidate);
               }
             } else if (typeof slide.content === 'string' && slide.content.trim()) {
-              const more = slide.content.split(/\n|\.|;|\u2022|\r/).map(s => s.trim()).filter(Boolean);
+              const more = parseListItems(slide.content);
               for (let m of more) {
                 if (dataForRender.length >= targetPoints) break;
                 if (!dataForRender.includes(m)) dataForRender.push(m);
               }
             }
             if (dataForRender.length < targetPoints && slide.takeaway) {
-              const tparts = slide.takeaway.split(/\n|\.|;|\u2022|\r/).map(s => s.trim()).filter(Boolean);
+              const tparts = parseListItems(slide.takeaway);
               for (let t of tparts) {
                 if (dataForRender.length >= targetPoints) break;
                 if (!dataForRender.includes(t)) dataForRender.push(t);
@@ -290,7 +294,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
           if (Array.isArray(slide.content) && slide.content.length > 0) {
             dataForRender = slide.content.slice(0, targetPoints);
           } else if (typeof slide.content === 'string' && slide.content.trim()) {
-            dataForRender = slide.content.split(/\n|\.|;|\u2022|\r/).map(s => s.trim()).filter(Boolean).slice(0, targetPoints);
+            dataForRender = parseListItems(slide.content).slice(0, targetPoints);
           }
           if (dataForRender.length < targetPoints && slide.takeaway) {
             dataForRender.push(slide.takeaway);
@@ -349,6 +353,60 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
     });
   };
 
+  const enrichSection = async (itemId, numPoints = 3) => {
+    // Open modal with current content; modal will call the backend when user presses Enrich with AI
+    const item = canvasItems.find(it => it.id === itemId);
+    if (!item) return;
+    const initial = Array.isArray(item.data) ? item.data.join('\n') : String(item.data || '');
+    setEnrichModal({ open: true, itemId, initialContent: initial });
+  };
+
+  const applyEnrichedContent = (itemId, newContent) => {
+    if (itemId == null) return;
+    // Replace current content with newContent; try to coerce into array if multiple lines
+    const parsed = newContent.split('\n').map(s => s.trim()).filter(Boolean);
+    const final = parsed.length > 1 ? parsed : (parsed[0] || newContent);
+    setCanvasItems(items => items.map(it => it.id === itemId ? { ...it, data: final } : it));
+    setEnrichModal({ open: false, itemId: null, initialContent: '' });
+  };
+
+  // Add a blank line to an item's data and open inline editor for quick editing.
+  const addBlankLineToItem = (itemId) => {
+    const item = canvasItems.find(it => it.id === itemId);
+    if (!item) return;
+    // If array, append empty string
+    if (Array.isArray(item.data)) {
+      const newData = [...item.data, ''];
+      setCanvasItems(items => items.map(it => it.id === itemId ? { ...it, data: newData } : it));
+      setEditingValues(prev => ({ ...prev, [itemId]: newData.join('\n') }));
+      setEditingMap(prev => ({ ...prev, [itemId]: true }));
+      return;
+    }
+    // If string, parse into list items and append
+    if (typeof item.data === 'string') {
+      try {
+        const parts = parseListItems(item.data).map(s => s.trim()).filter(Boolean);
+        const newData = parts.length > 0 ? [...parts, ''] : [item.data, ''];
+        setCanvasItems(items => items.map(it => it.id === itemId ? { ...it, data: newData } : it));
+        setEditingValues(prev => ({ ...prev, [itemId]: newData.join('\n') }));
+        setEditingMap(prev => ({ ...prev, [itemId]: true }));
+        return;
+      } catch (err) {
+        // fallback: convert to array
+        const newData = [String(item.data || ''), ''];
+        setCanvasItems(items => items.map(it => it.id === itemId ? { ...it, data: newData } : it));
+        setEditingValues(prev => ({ ...prev, [itemId]: newData.join('\n') }));
+        setEditingMap(prev => ({ ...prev, [itemId]: true }));
+        return;
+      }
+    }
+    // For objects or other types, coerce to a simple array with an empty second line
+    const newData = [typeof item.data === 'object' ? JSON.stringify(item.data) : String(item.data || ''), ''];
+    setCanvasItems(items => items.map(it => it.id === itemId ? { ...it, data: newData } : it));
+    setEditingValues(prev => ({ ...prev, [itemId]: newData.join('\n') }));
+    setEditingMap(prev => ({ ...prev, [itemId]: true }));
+  };
+
   // Reset canvas state if slides change (e.g., new deck generated)
   useEffect(() => {
     setSlideCanvasState({});
@@ -403,14 +461,26 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
     if (!item) return;
     let initial = '';
     try {
-      if (item.type === 'chart') {
-        initial = JSON.stringify(item.chartData || item.data || {}, null, 2);
-      } else if (item.type === 'frameworks') {
+      // Prefer human-friendly editable text instead of JSON
+      if (item.type === 'frameworks') {
+        // frameworks have a custom table editor elsewhere; keep JSON to feed that UI
         initial = JSON.stringify(item.frameworkData || item.data || {}, null, 2);
-      } else if (typeof item.data === 'object') {
-        initial = JSON.stringify(item.data, null, 2);
+      } else if (item.type === 'chart') {
+        // For charts, show labels or array data as newline-separated list where possible
+        if (item.chartData && Array.isArray(item.chartData.labels)) {
+          initial = item.chartData.labels.join('\n');
+        } else if (Array.isArray(item.data)) {
+          initial = item.data.join('\n');
+        } else if (typeof item.data === 'object' && item.data !== null) {
+          initial = Object.entries(item.data).map(([k, v]) => Array.isArray(v) ? `${k}: ${v.join(', ')}` : `${k}: ${v}`).join('\n');
+        } else {
+          initial = String(item.data || '');
+        }
       } else if (Array.isArray(item.data)) {
         initial = item.data.join('\n');
+      } else if (typeof item.data === 'object' && item.data !== null) {
+        // Convert object into key: value human readable lines
+        initial = Object.entries(item.data).map(([k, v]) => Array.isArray(v) ? `${k}: ${v.join(', ')}` : `${k}: ${v}`).join('\n');
       } else {
         initial = String(item.data || '');
       }
@@ -436,8 +506,14 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
       if (item.id !== id) return item;
       try {
         if (item.type === 'chart') {
-          const parsed = raw ? JSON.parse(raw) : {};
-          return { ...item, chartData: parsed, data: parsed };
+          // Accept JSON if provided, otherwise treat input as newline labels list
+          if (raw.startsWith('{') || raw.startsWith('[')) {
+            const parsed = JSON.parse(raw);
+            return { ...item, chartData: parsed, data: parsed };
+          }
+          const labels = raw.split('\n').map(s => s.trim()).filter(Boolean);
+          const chartObj = { labels };
+          return { ...item, chartData: chartObj, data: labels };
         } else if (item.type === 'frameworks') {
           const parsed = raw ? JSON.parse(raw) : {};
           // try to keep framework list in item.data if keys exist
@@ -454,7 +530,30 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
             return { ...item, data: { takeaway, call_to_action } };
           }
         } else {
-          // Generic: try JSON parse, otherwise set string or array
+          // Generic: if original data was an object, parse key:value lines into object
+          const wasObject = typeof item.data === 'object' && item.data !== null && !Array.isArray(item.data);
+          if (wasObject) {
+            if (raw.startsWith('{') || raw.startsWith('[')) {
+              const parsed = JSON.parse(raw);
+              return { ...item, data: parsed };
+            }
+            const lines = raw.split('\n').map(s => s.trim()).filter(Boolean);
+            const parsedObj = {};
+            lines.forEach(ln => {
+              const idx = ln.indexOf(':');
+              if (idx > -1) {
+                const key = ln.slice(0, idx).trim();
+                const rest = ln.slice(idx + 1).trim();
+                if (rest.includes(',')) {
+                  parsedObj[key] = rest.split(',').map(s => s.trim()).filter(Boolean);
+                } else {
+                  parsedObj[key] = rest;
+                }
+              }
+            });
+            return { ...item, data: parsedObj };
+          }
+          // Otherwise try JSON, else lines/primitive
           if (raw.startsWith('{') || raw.startsWith('[')) {
             const parsed = JSON.parse(raw);
             return { ...item, data: parsed };
@@ -876,15 +975,19 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                             {editingMap[item.id] ? (
                               (() => {
                                 const raw = editingValues[item.id] || (Array.isArray(item.data) ? item.data.join('\n') : String(item.data || ''));
-                                const lines = raw.split('\n').map(s=>s.trim()).filter(Boolean);
+                                const lines = raw.split('\n'); // preserve empty lines
                                 return (
-                                  <div className="flex flex-col gap-2">
+                                  <div className="flex flex-col gap-3">
                                     {lines.map((line, li) => (
-                                      <textarea key={li} value={line} onChange={(e)=>{
-                                        const copy = lines.slice(); copy[li] = e.target.value; setEditingValues(prev=>({ ...prev, [item.id]: copy.join('\n') }));
-                                      }} className="w-full p-2 border border-gray-200 rounded text-sm" />
+                                      <div key={li} className="rounded-lg p-3" style={{ background: CARD_PALETTE[li % CARD_PALETTE.length].bg, borderLeft: `6px solid ${CARD_PALETTE[li % CARD_PALETTE.length].accent}` }}>
+                                        <textarea key={li} value={line} onChange={(e)=>{
+                                          const copy = lines.slice(); copy[li] = e.target.value; setEditingValues(prev=>({ ...prev, [item.id]: copy.join('\n') }));
+                                        }} className="w-full p-2 border border-gray-200 rounded text-sm bg-white" />
+                                      </div>
                                     ))}
-                                    <button type="button" onClick={()=>{ const copy = lines.slice(); copy.push(''); setEditingValues(prev=>({ ...prev, [item.id]: copy.join('\n') })); }} className="text-sm text-blue-600">Add point</button>
+                                    <div className="mt-1">
+                                      <button type="button" onClick={()=>{ const copy = lines.slice(); copy.push(''); setEditingValues(prev=>({ ...prev, [item.id]: copy.join('\n') })); }} className="text-sm text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity duration-150">Add point</button>
+                                    </div>
                                   </div>
                                 );
                               })()
@@ -926,17 +1029,21 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                       <div className="mb-4 w-full">
                         <h3 className="text-base font-bold text-gray-800 uppercase tracking-wide mb-3">{item.title || item.type || "SECTION"}</h3>
                         {(() => {
-                          if (editingMap[item.id]) {
-                            // Inline editing for generic data
+                            if (editingMap[item.id]) {
+                            // Inline editing for generic data (render deck-like cards for arrays)
                             if (Array.isArray(item.data)) {
                               const raw = editingValues[item.id] || item.data.join('\n');
-                              const lines = raw.split('\n').map(s=>s.trim()).filter(Boolean);
+                              const lines = raw.split('\n'); // preserve empties
                               return (
-                                <div className="flex flex-col gap-2">
+                                <div className="flex flex-col gap-3">
                                   {lines.map((ln, i) => (
-                                    <textarea key={i} value={ln} onChange={(e)=>{ const copy = lines.slice(); copy[i]=e.target.value; setEditingValues(prev=>({ ...prev, [item.id]: copy.join('\n') })); }} className="w-full p-2 border border-gray-200 rounded text-sm" />
+                                    <div key={i} className="rounded-lg p-3" style={{ background: CARD_PALETTE[i % CARD_PALETTE.length].bg, borderLeft: `6px solid ${CARD_PALETTE[i % CARD_PALETTE.length].accent}` }}>
+                                      <textarea value={ln} onChange={(e)=>{ const copy = lines.slice(); copy[i]=e.target.value; setEditingValues(prev=>({ ...prev, [item.id]: copy.join('\n') })); }} className="w-full p-2 border border-gray-200 rounded text-sm bg-white" />
+                                    </div>
                                   ))}
-                                  <button type="button" onClick={()=>{ const copy = lines.slice(); copy.push(''); setEditingValues(prev=>({ ...prev, [item.id]: copy.join('\n') })); }} className="text-sm text-blue-600">Add line</button>
+                                  <div className="mt-1">
+                                    <button type="button" onClick={()=>{ const copy = lines.slice(); copy.push(''); setEditingValues(prev=>({ ...prev, [item.id]: copy.join('\n') })); }} className="text-sm text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity duration-150">Add line</button>
+                                  </div>
                                 </div>
                               );
                             } else if (typeof item.data === 'object' && item.data !== null) {
@@ -960,12 +1067,23 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                             );
                           } else if (typeof item.data === 'string') {
                             // String: split into bullets if possible
-                            const points = item.data.split(/\n|\r|\u2022|^- /gm).map(s => s.trim()).filter(s => s && s !== '-');
+                            const points = parseListItems(item.data).map(s => s.trim()).filter(s => s && s !== '-');
                             if (points.length > 1) {
                               return <SmartArtFlow items={points} palette={ (remotePalette && remotePalette.length>0) ? remotePalette : CARD_PALETTE.map(p=>p.accent) } />;
                             } else {
                               return (
-                                <span className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">{item.data}</span>
+                                <div>
+                                  <span className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">{item.data}</span>
+                                  <div className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto">
+                                    <button
+                                      className="text-sm text-blue-600"
+                                      onClick={() => enrichSection(item.id, 3)}
+                                      disabled={!!isEnriching[item.id]}
+                                    >
+                                      {isEnriching[item.id] ? 'Adding...' : 'Add more content'}
+                                    </button>
+                                  </div>
+                                </div>
                               );
                             }
                           } else {
@@ -1163,6 +1281,12 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
           {isFullScreen ? "Minimize" : "Full Screen"}
         </button>
       </div>
+      <EnrichConfirmModal
+        open={enrichModal.open}
+        initialContent={enrichModal.initialContent}
+        onClose={() => setEnrichModal({ open: false, itemId: null, initialContent: '' })}
+        onDone={(content) => applyEnrichedContent(enrichModal.itemId, content)}
+      />
     </>
   );
 }

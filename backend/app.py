@@ -64,13 +64,115 @@ MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 from contextlib import asynccontextmanager
 from auth import users_collection
 from motor.motor_asyncio import AsyncIOMotorClient
+from threading import Event
+import threading
+import requests
 
 @asynccontextmanager
 async def lifespan(app):
     await users_collection.create_index("email", unique=True)
-    yield
+    # Start a simple background health pinger thread that periodically hits the configured HEALTHCHECK_URL
+    stop_event = Event()
+    health_url = os.getenv('HEALTHCHECK_URL', 'https://consulting-deck-app.onrender.com/health')
+    
+    interval = 60*15
+
+    def _pinger():
+        while not stop_event.is_set():
+            try:
+                # fire-and-forget GET; we don't need the response body
+                requests.get(health_url, timeout=10)
+            except Exception:
+                # ignore errors - this is only to ensure the server is reachable
+                pass
+            # Wait with early exit support
+            stop_event.wait(interval)
+
+    thread = threading.Thread(target=_pinger, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop_event.set()
+        thread.join(timeout=5)
 
 app = FastAPI(title="Smart Consulting Deck Generator", lifespan=lifespan)
+
+
+@app.get('/health')
+async def health_check():
+    """Simple health check endpoint used by the health pinger and external monitoring."""
+    from datetime import datetime
+    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+
+
+@app.post('/enrich_section')
+async def enrich_section(payload: dict):
+    """Accepts { title?: str, content: str, num_points?: int } and returns additional bullet points to expand the section.
+
+    This is a lightweight enrichment endpoint used by the frontend when the user asks for "More content" on a sparse section.
+    """
+    title = payload.get('title', '')
+    content = payload.get('content', '')
+    num = int(payload.get('num_points', 3) or 3)
+    if not content:
+        return {"error": "content is required"}
+
+    # Stronger prompt: request NEW, non-redundant, actionable bullets that expand the content
+    prompt = (
+        f"Generate {num} NEW, non-redundant, actionable bullet points that EXPAND on the input section. "
+        "Do NOT merely rephrase the original content — add concrete, novel ideas, examples, or next steps that build on it. "
+        "Each bullet should be concise (1-2 sentences) and focused on practical recommendations or specific elaborations. "
+        "When helpful, include an example, metric, or brief suggested action.\n\n"
+        f"Title: {title}\nContent: {content}\n\n"
+        "IMPORTANT: Return ONLY a valid JSON array of strings (e.g. [\"bullet 1\", \"bullet 2\"]). Do not include any markdown, backticks, explanatory text, or trailing commas."
+    )
+    try:
+        completion = openai_client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that writes concise, actionable slide bullets."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.35,
+            max_tokens=400,
+        )
+        text = completion.choices[0].message.content.strip()
+        import json as _json
+        # Try to extract a JSON array from the model output (handles cases where model adds surrounding text)
+        try:
+            m = re.search(r'(\[.*\])', text, re.DOTALL)
+            candidate = m.group(1) if m else text
+            # Remove common trailing commas before closing bracket
+            candidate = re.sub(r',\s*(\])', r'\1', candidate)
+            arr = _json.loads(candidate)
+            if isinstance(arr, list):
+                cleaned = [str(x).strip() for x in arr if str(x).strip()]
+                return {"bullets": cleaned[:num]}
+        except Exception:
+            # fallback: split by newlines and clean
+            lines = [l.strip() for l in text.split('\n') if l.strip()]
+            cleaned = []
+            for l in lines:
+                # remove numbering/bullets like "1.", "-", "•"
+                s = re.sub(r'^\s*(?:\d+\.|[-•\u2022])\s*', '', l).strip()
+                # strip surrounding quotes and trailing commas
+                s = re.sub(r'^["\']|["\']$|,$', '', s).strip()
+                if s:
+                    cleaned.append(s)
+            # If cleaned is empty, fall back to the original content plus a small generated suggestion
+            if not cleaned:
+                cleaned = [content.strip()] if content.strip() else []
+            # If the model only reframed the input (single item equal to input), try to append an example
+            if len(cleaned) == 1 and cleaned[0].lower().startswith(content.strip().lower()[:30]):
+                base = cleaned[0]
+                extra = base
+                if 'example' not in base.lower():
+                    extra = base + ' For example, run a short pilot to validate and measure results.'
+                cleaned = [base, extra][:num]
+            return {"bullets": cleaned[:num]}
+    except Exception as e:
+        return {"error": str(e)}
 
 # MongoDB decks collection
 MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://lobrockyl:Moyyn123@consultdg.ocafbf0.mongodb.net/?retryWrites=true&w=majority&appName=ConsultDG")
