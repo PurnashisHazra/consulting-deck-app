@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
+import TableUploader from './TableUploader';
 
 export default function SlideForm({ onSubmit, isLoading }) {
   const [problem, setProblem] = useState("");
   const [storyline, setStoryline] = useState("");
   const [numSlides, setNumSlides] = useState(3);
+  const [deepAnalysis, setDeepAnalysis] = useState(false);
   
   const SUGGESTED_TAGS = [
     'Problem Statement', 'Market Size', 'Customer Segments', 'Key Insight', 'Recommendation',
@@ -87,26 +89,52 @@ export default function SlideForm({ onSubmit, isLoading }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     // expose current form state so parent can read it for enrichment
-    if (typeof window !== 'undefined') {
-      window._latestSlideForm = {
-        problem_statement: problem,
-        storyline: storyline.split("\n").map(s=>s.trim()).filter(Boolean),
-        num_slides: parseInt(numSlides),
-        data: {
-          Region: ["APAC", "EMEA", "NA"],
-          Revenue: [100, 200, 300]
-        }
-      };
-    }
-    onSubmit({
+    const payload = {
       problem_statement: problem,
       storyline: storyline.split("\n").map(s=>s.trim()).filter(Boolean),
       num_slides: parseInt(numSlides),
-      data: {
+      data: uploadedData || {
         Region: ["APAC", "EMEA", "NA"],
         Revenue: [100, 200, 300]
       }
-    });
+    };
+    // include deep analysis flag
+    payload.deep_analysis = !!deepAnalysis;
+    if (typeof window !== 'undefined') {
+      window._latestSlideForm = { ...window._latestSlideForm, ...payload };
+    }
+    onSubmit(payload);
+  };
+
+  // store uploaded table data locally so it can be included in payload
+  const [uploadedData, setUploadedData] = useState(null);
+  const [uploadedFiles, setUploadedFiles] = useState([]);
+  const onTableData = (payload) => {
+    // support both new shape { table_data, table_sources } and old { data, meta }
+    if (!payload) return;
+    if (payload.table_data) {
+      const table_data = payload.table_data || {};
+      const table_sources = payload.table_sources || [];
+      const firstKey = Object.keys(table_data)[0];
+      const firstTable = firstKey ? table_data[firstKey] : null;
+      setUploadedData(firstTable || null);
+      setUploadedFiles(table_sources.map(s => s.filename || '').filter(Boolean));
+      if (typeof window !== 'undefined') {
+        window._latestSlideForm = window._latestSlideForm || {};
+        window._latestSlideForm.table_data = table_data;
+        window._latestSlideForm.table_sources = table_sources;
+        if (firstTable) window._latestSlideForm.data = firstTable;
+      }
+    } else if (payload.data) {
+      // backward compatibility
+      setUploadedData(payload.data || null);
+      setUploadedFiles([(payload.meta && payload.meta.filename) || '']);
+      if (typeof window !== 'undefined') {
+        window._latestSlideForm = window._latestSlideForm || {};
+        window._latestSlideForm.data = payload.data || {};
+        window._latestSlideForm.meta = payload.meta || { filename: '', fileType: '' };
+      }
+    }
   };
 
   // Allow external code (the enrichment modal) to apply an enriched problem directly into this form
@@ -136,6 +164,23 @@ export default function SlideForm({ onSubmit, isLoading }) {
           rows={4}
           required
         />
+        {/* Deep analysis toggle placed below problem statement as requested */}
+        <div className="mt-2 flex items-center space-x-3">
+          <label className="flex items-center space-x-2 text-sm">
+            <input type="checkbox" checked={deepAnalysis} onChange={(e) => setDeepAnalysis(e.target.checked)} />
+            <span className="text-xs ">Enable deep analysis on uploaded data tables</span>
+          </label>
+        </div>
+      </div>
+      {/* Table Uploader: moved below Problem Statement */}
+      <div className="mt-2">
+        <label className="block text-sm font-semibold text-gray-900 mb-1">Upload Data (optional)</label>
+        <TableUploader onData={onTableData} />
+        {uploadedFiles && uploadedFiles.length > 0 ? (
+          <div className="text-xs text-gray-500 mt-1">Uploaded files: {uploadedFiles.join(', ')}</div>
+        ) : uploadedData ? (
+          <div className="text-xs text-gray-500 mt-1">Uploaded table columns: {Object.keys(uploadedData).join(', ')}</div>
+        ) : null}
       </div>
 
       {/* Storyline */}
@@ -216,6 +261,8 @@ export default function SlideForm({ onSubmit, isLoading }) {
           required
         />
       </div>
+
+      
 
       {/* Submit Button */}
       <button 

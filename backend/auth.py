@@ -77,7 +77,7 @@ from fastapi.security import OAuth2PasswordBearer
 # JWT secret key
 SECRET_KEY = "your_secret_key"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 90
 
 # MongoDB Atlas connection
 MONGO_URI = "mongodb+srv://lobrockyl:Moyyn123@consultdg.ocafbf0.mongodb.net/?retryWrites=true&w=majority&appName=ConsultDG"

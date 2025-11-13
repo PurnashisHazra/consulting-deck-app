@@ -545,6 +545,18 @@ function App() {
         // user cancelled enrichment
       }
     }
+    // attach any uploaded table data and deep analysis flag
+    try {
+      const latest = (typeof window !== 'undefined' && window._latestSlideForm) ? window._latestSlideForm : null;
+      if (latest && latest.data) {
+        // include the raw table columns as part of payload
+        payload.table_data = latest.data;
+        payload.table_sources = latest.meta ? [latest.meta] : (latest.filename ? [{ filename: latest.filename }] : []);
+      }
+  // deep_analysis is provided by the SlideForm payload now
+    } catch (e) {
+      // ignore
+    }
     setIsLoading(true);
     try {
       // Check if user has at least 1 coin before generating slides
@@ -795,7 +807,9 @@ function App() {
                       </h2>
                     </div>
                     <div className="">
-                      <SlideForm onSubmit={handleSubmit} isLoading={isLoading} />
+                      <div className="space-y-3">
+                        <SlideForm onSubmit={handleSubmit} isLoading={isLoading} />
+                      </div>
                     </div>
                   </div>
                   {/* Slides Section (below form) */}

@@ -201,6 +201,9 @@ class SlideRequest(BaseModel):
     storyline: List[str]
     num_slides: int
     data: Optional[dict] = None
+    table_data: Optional[dict] = None
+    table_sources: Optional[List[dict]] = None
+    deep_analysis: Optional[bool] = False
 
 def generate_dummy_data(visualization: str, slide_content: str):
     """Generate realistic dummy data based on visualization type and content"""
@@ -251,7 +254,7 @@ def generate_dummy_data(visualization: str, slide_content: str):
             {"label": "Region D", "value": 110}
         ]
 
-def generate_deck_single_call(problem_statement: str, storyline: List[str], num_slides: int, data: Optional[dict]):
+def generate_deck_single_call(problem_statement: str, storyline: List[str], num_slides: int, data: Optional[dict], table_data: Optional[dict]=None, table_sources: Optional[List[dict]]=None, deep_analysis: bool=False):
     #Check if user has enough coins
 
     """Single-call deck generator that includes frameworks and charts repos and returns a complete structured deck."""
@@ -266,7 +269,126 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
         "num_slides": num_slides,
         "data": data or {},
         "repos": repos_context,
+        "table_data": table_data or {},
+        "table_sources": table_sources or [],
+        "deep_analysis": bool(deep_analysis),
     }
+
+    # --- Table summarizer and metric extractor ---
+    def summarize_tables(tables: Optional[dict]):
+        """Return compact summaries for each uploaded table to include in prompts.
+
+        tables: mapping filename -> column-oriented dict (col -> list)
+        """
+        summaries = {}
+        if not tables:
+            return summaries
+        for fname, tbl in (tables.items() if isinstance(tables, dict) else []):
+            try:
+                df = pd.DataFrame(tbl)
+            except Exception:
+                summaries[fname] = {"error": "could not parse table"}
+                continue
+            s = {}
+            s['num_rows'] = int(len(df))
+            s['columns'] = list(df.columns)
+            # sample up to 2 rows
+            try:
+                s['sample_rows'] = df.head(2).fillna('').astype(str).to_dict(orient='records')
+            except Exception:
+                s['sample_rows'] = []
+            # missing counts
+            miss = {}
+            for c in df.columns:
+                miss[c] = int(df[c].isna().sum())
+            s['missing_counts'] = miss
+            # types and numeric stats
+            types = {}
+            stats = {}
+            for c in df.columns:
+                col = df[c]
+                # try numeric
+                num = pd.to_numeric(col.astype(str).str.replace(',','').replace(' ','').replace('%',''), errors='coerce')
+                num_non_null = num.dropna()
+                if len(num_non_null) >= max(1, int(0.4 * max(1, len(col)))):
+                    types[c] = 'numeric'
+                    try:
+                        stats[c] = {
+                            'count': int(num_non_null.count()),
+                            'mean': float(num_non_null.mean()),
+                            'median': float(num_non_null.median()),
+                            'min': float(num_non_null.min()),
+                            'max': float(num_non_null.max())
+                        }
+                    except Exception:
+                        stats[c] = {}
+                    continue
+                # try datetime
+                dt = None
+                try:
+                    dt = pd.to_datetime(col, errors='coerce', utc=True)
+                except Exception:
+                    dt = pd.Series([pd.NaT]*len(col))
+                dt_non_null = dt.dropna()
+                if len(dt_non_null) >= max(1, int(0.4 * max(1, len(col)))):
+                    types[c] = 'datetime'
+                    try:
+                        smin = dt_non_null.min()
+                        smax = dt_non_null.max()
+                        stats[c] = {'start': sanitize_for_json(smin), 'end': sanitize_for_json(smax)}
+                    except Exception:
+                        stats[c] = {}
+                    continue
+                types[c] = 'string'
+            s['types'] = types
+            s['numeric_stats'] = stats
+            summaries[fname] = s
+        return summaries
+
+    def extract_financial_metrics(table_summaries: dict):
+        """Look for common financial columns and compute simple metrics/ratios."""
+        metrics = {}
+        # heuristics for column names
+        targets = ['revenue', 'ebitda', 'net income', 'net_income', 'netincome', 'fcf', 'free cash flow', 'operating cash flow', 'total debt', 'equity', 'assets', 'liabilities']
+        for fname, summ in table_summaries.items():
+            try:
+                cols = [c.lower() for c in summ.get('columns', [])]
+            except Exception:
+                cols = []
+            found = {t: None for t in targets}
+            for c in cols:
+                for t in targets:
+                    if t in c:
+                        found[t] = c
+            # simple extraction: take last non-null value for numeric columns if available in samples
+            fm = {}
+            # try using sample_rows to fetch numbers
+            samples = summ.get('sample_rows', [])
+            for key, colname in found.items():
+                if colname and samples:
+                    # attempt to read last sample value
+                    try:
+                        val = samples[-1].get(colname, None)
+                        if val is None:
+                            # try matching ignoring spaces/underscores
+                            for srk in samples[-1].keys():
+                                if srk.lower().replace(' ','').replace('_','') == colname.replace(' ','').replace('_',''):
+                                    val = samples[-1].get(srk)
+                        if val is not None:
+                            # coerce numeric
+                            try:
+                                v = float(str(val).replace(',','').replace('%',''))
+                                fm[key] = v
+                            except Exception:
+                                fm[key] = str(val)
+                    except Exception:
+                        pass
+            if fm:
+                metrics[fname] = fm
+        return metrics
+
+    table_summaries = summarize_tables(payload.get('table_data'))
+    financial_metrics = extract_financial_metrics(table_summaries)
     system_instructions = (
         "You are a veteran McKinsey/BCG partner and expert in consulting slide design, . For each slide, provide: "
         "1. Slide Archetype (e.g., Title-Content, Comparison, Timeline, Framework, Data Chart, etc.). "
@@ -324,6 +446,7 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
         },
         "required": ["optimized_storyline","slides"]
     }
+    # Attach the generated table summaries and metrics into the prompt to guide the LLM
     prompt = f"""
     SYSTEM:
     {system_instructions}
@@ -333,6 +456,17 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
 
     REPOS (JSON):
     {json.dumps(repos_context, ensure_ascii=False)}
+
+    TABLE DATA / SOURCES:
+    {json.dumps({'table_sources': table_sources or [], 'table_data_sample': (list(table_data.keys())[:10] if isinstance(table_data, dict) else [])}, ensure_ascii=False)}
+
+    TABLE SUMMARIES (JSON):
+    {json.dumps(sanitize_for_json(table_summaries), ensure_ascii=False)}
+
+    FINANCIAL METRICS (JSON):
+    {json.dumps(sanitize_for_json(financial_metrics), ensure_ascii=False)}
+
+    IMPORTANT: If deep_analysis == true, read the provided tables carefully, call out any specific data points used in your inferences, and cite the table filename (from table_sources) where the data came from. Include a top-level field `table_sources` in your response listing any sources referenced.
 
     RESPONSE REQUIREMENTS:
     - Return only JSON that conforms to this schema:
@@ -385,6 +519,13 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
             "recommendations": {}
         }
     #print("------Generated deck:", result)
+    # Ensure result includes the table sources that were provided so frontend can display them
+    try:
+        result.setdefault('table_sources', table_sources or [])
+        result.setdefault('table_summaries', sanitize_for_json(table_summaries))
+        result.setdefault('financial_metrics', sanitize_for_json(financial_metrics))
+    except Exception:
+        pass
     return result
 
 # --- Server-side Chart Rendering ---
@@ -448,6 +589,9 @@ async def generate_slides(request: SlideRequest, authorization: str = Header(Non
         request.storyline,
         request.num_slides,
         request.data,
+        table_data=request.table_data,
+        table_sources=request.table_sources,
+        deep_analysis=bool(request.deep_analysis),
     )
     # Get token from the header
     if not authorization or not authorization.startswith("Bearer "):
