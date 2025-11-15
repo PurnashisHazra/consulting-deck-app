@@ -84,6 +84,8 @@ MONGO_URI = "mongodb+srv://lobrockyl:Moyyn123@consultdg.ocafbf0.mongodb.net/?ret
 client = AsyncIOMotorClient(MONGO_URI)
 db = client.get_database("consulting_deck")
 users_collection = db.get_collection("users")
+# Collection to store buy-coin requests from frontend
+buy_coin_collection = db.get_collection("buy_coin")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -192,7 +194,34 @@ async def consume_coin(token: str = Depends(oauth2_scheme), data: dict = Body(..
         raise HTTPException(status_code=401, detail="Invalid token")
 
 @router.post("/buy_coins")
-async def buy_coins(data: dict):
+async def buy_coins(data: dict = Body(...)):
     # data: {name, email, mobile, coins}
-    
-    return {"success": True}
+    try:
+        name = data.get('name') or data.get('fullName') or data.get('username')
+        email = data.get('email')
+        mobile = data.get('mobile') or data.get('phone')
+        coins = data.get('coins')
+        try:
+            coins = int(coins)
+        except Exception:
+            coins = 0
+
+        if not email and not mobile:
+            raise HTTPException(status_code=400, detail="email or mobile is required")
+        if coins <= 0:
+            raise HTTPException(status_code=400, detail="coins must be a positive integer")
+
+        doc = {
+            "name": name,
+            "email": email,
+            "mobile": mobile,
+            "coins": coins,
+            "status": "pending",
+            "created_at": datetime.utcnow()
+        }
+        res = await buy_coin_collection.insert_one(doc)
+        return {"success": True, "id": str(res.inserted_id)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
