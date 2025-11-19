@@ -1,7 +1,7 @@
+import React from "react";
 import { Route, Routes, Navigate, useNavigate } from "react-router-dom";
 import { useState, useEffect, createContext, useContext } from "react";
 import SlideForm from "./components/SlideForm";
-import SlidePreview from "./components/SlidePreview";
 import CanvasSlidePreview from "./components/CanvasSlidePreview";
 import ProblemEnrichModal from "./components/ProblemEnrichModal";
 import { generateSlides, API_BASE_URL, fetchSavedDecks, saveDeck } from "./api";
@@ -429,10 +429,9 @@ export function AuthProvider({ children }) {
   // Keep localStorage and state in sync
   useEffect(() => {
     if (isAuthenticated) {
-      if(!!token){
-        localStorage.removeItem("token");
+      if(token){
+        localStorage.setItem("token", token);
       }
-      localStorage.setItem("token", token);
     } else {
       localStorage.removeItem("token");
     }

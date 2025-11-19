@@ -57,6 +57,55 @@ const DEFAULT_COLORS = ["#2563eb", "#06b6d4", "#8b5cf6", "#f59e0b", "#10b981", "
 // Top-level alias for legacy helpers that referenced COLORS
 const COLORS = DEFAULT_COLORS;
 
+// Map backend chart names to supported frontend renderer types or sensible fallbacks
+const CHART_ALIAS = {
+  "Horizontal Bar Chart": "Gantt Chart", // use chartjs horizontal bar
+  "Grouped Bar Chart": "Stacked Bar Chart",
+  "100% Stacked Bar Chart": "Stacked Bar Chart",
+  "Multi-series Line Chart": "Multi-Series Line Chart",
+  "Multi-series Line": "Multi-Series Line Chart",
+  "Area Chart": "Line Chart",
+  "Stacked Area Chart": "Line Chart",
+  "Streamgraph": "Line Chart",
+  "Sparkline": "Line Chart",
+  "Histogram": "Histogram",
+  "Box Plot": "Histogram",
+  "Violin Plot": "Histogram",
+  "Hexbin Plot": "Heatmap",
+  "Pareto Chart": "Bar Chart",
+  "Funnel Chart": "Bar Chart",
+  "Sankey Diagram": "Stacked Bar Chart",
+  "Alluvial Diagram": "Stacked Bar Chart",
+  "Treemap": "Doughnut Chart",
+  "Sunburst Chart": "Doughnut Chart",
+  "Icicle Chart": "Doughnut Chart",
+  "Dendrogram": "Doughnut Chart",
+  "Parallel Coordinates": "Multi-Series Line Chart",
+  "Heatmap": "Heatmap",
+  "Calendar Heatmap": "Heatmap",
+  "Annotated Timeline": "Line Chart",
+  "Cohort Retention Heatmap": "Heatmap",
+  "Retention Curve": "Line Chart",
+  "Network Graph": "Scatter Plot",
+  "Chord Diagram": "Scatter Plot",
+  "Chord (weighted)": "Scatter Plot",
+  "Geo Choropleth Map": "Scatter Plot",
+  "Proportional Symbol Map": "Scatter Plot",
+  "Flow Map": "Scatter Plot",
+  "Ternary Plot": "Doughnut Chart",
+  "Waffle Chart": "Doughnut Chart",
+  "Donut Chart": "Doughnut Chart",
+  "Bullet Chart": "Bar Chart",
+  "KPI Tile": "Bar Chart",
+  "Tornado Chart": "Gantt Chart",
+  "Decision Matrix (Weighted Scoring)": "Bar Chart",
+  "Risk Heat Map": "Heatmap",
+  "Scree Plot": "Line Chart",
+  "ROC Curve": "Line Chart",
+  "Precision-Recall Curve": "Line Chart",
+  "Cartogram": "Scatter Plot",
+};
+
 function normalizePalette(p) {
   if (!p) return DEFAULT_COLORS;
   if (Array.isArray(p) && p.length > 0) return p.map(x => String(x).trim());
@@ -64,8 +113,33 @@ function normalizePalette(p) {
 }
 
 function normalizeChartData(type, data) {
+  // apply aliasing from backend CHART_REPO names to canonical types
+  const canonical = CHART_ALIAS[type] || type;
+  type = canonical;
   if (!data) return dummyData[type] || dummyData["Bar Chart"];
   if (Array.isArray(data)) return data;
+  // multi-series: support { labels: [...], series: [{ name, values: [...] }, ...] }
+  if (data.series && Array.isArray(data.series) && Array.isArray(data.labels)) {
+    return data.labels.map((label, idx) => {
+      const row = { label };
+      data.series.forEach((s, si) => {
+        const key = s.name || `Series ${si + 1}`;
+        row[key] = (Array.isArray(s.values) && s.values.length > idx) ? s.values[idx] : null;
+      });
+      return row;
+    });
+  }
+  // Chart.js-style datasets -> convert to table-like series rows if labels exist
+  if (Array.isArray(data.datasets) && Array.isArray(data.labels)) {
+    return data.labels.map((label, idx) => {
+      const row = { label };
+      data.datasets.forEach((ds, di) => {
+        const key = ds.label || `Series ${di + 1}`;
+        row[key] = (Array.isArray(ds.data) && ds.data.length > idx) ? ds.data[idx] : null;
+      });
+      return row;
+    });
+  }
   if (data.labels && data.values && Array.isArray(data.labels) && Array.isArray(data.values)) {
     return data.labels.map((label, idx) => ({ label, value: data.values[idx] }));
   }
@@ -81,10 +155,60 @@ function normalizeChartData(type, data) {
   return dummyData[type] || dummyData["Bar Chart"];
 }
 
+// Simple histogram binning helper
+function buildHistogramData(rawValues, buckets = 8) {
+  const nums = (Array.isArray(rawValues) ? rawValues.map(v => Number(v)).filter(n => !isNaN(n)) : []);
+  if (!nums.length) return [{ label: 'No data', value: 0 }];
+  const min = Math.min(...nums);
+  const max = Math.max(...nums);
+  const range = max - min || 1;
+  const binSize = range / buckets;
+  const bins = new Array(buckets).fill(0);
+  nums.forEach(n => {
+    let idx = Math.floor((n - min) / binSize);
+    if (idx < 0) idx = 0;
+    if (idx >= buckets) idx = buckets - 1;
+    bins[idx] += 1;
+  });
+  const out = bins.map((count, i) => ({ label: `${(min + i * binSize).toFixed(1)} - ${(min + (i + 1) * binSize).toFixed(1)}`, value: count }));
+  return out;
+}
+
+// Lightweight heatmap renderer: expects data.matrix = [[v11, v12], ...] or data as array of rows
+function Heatmap({ data, palette = DEFAULT_COLORS }) {
+  const matrix = data && Array.isArray(data.matrix) ? data.matrix : (Array.isArray(data) ? data : []);
+  if (!matrix || !matrix.length) return <div>No heatmap data</div>;
+  const flat = matrix.flat();
+  const min = Math.min(...flat);
+  const max = Math.max(...flat);
+  const norm = v => (v - min) / (max - min || 1);
+  return (
+    <div style={{ display: 'inline-block' }}>
+      {matrix.map((row, rIdx) => (
+        <div key={rIdx} style={{ display: 'flex' }}>
+          {row.map((cell, cIdx) => {
+            const v = Number(cell) || 0;
+            const t = Math.round(norm(v) * (palette.length - 1));
+            const bg = palette[t];
+            const color = readableTextColor(bg);
+            return (
+              <div key={cIdx} style={{ width: 24, height: 24, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color }}>
+                {Math.round(v)}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Chart.js supported types mapping
 const chartjsTypeMap = {
   "Bar Chart": "bar",
   "Line Chart": "line",
+  "Multi Series Line Chart": "line",
+  "Multi-Series Line Chart": "line",
   "Pie Chart": "pie",
   "Doughnut Chart": "doughnut",
   "Radar Chart": "radar",
@@ -92,6 +216,7 @@ const chartjsTypeMap = {
   "Bubble Chart": "bubble",
   "Scatter Plot": "scatter",
   "Waterfall Chart": "bar", // Use floating bars
+  "Waterfall": "bar",
   "Gantt Chart": "bar", // Use stacked horizontal bar
   "Stacked Bar Chart": "bar",
 };
@@ -100,6 +225,8 @@ function getChartJSComponent(type) {
   switch (type) {
     case "Bar Chart": return ChartJSBar;
     case "Line Chart": return ChartJSLine;
+    case "Multi Series Line Chart": return ChartJSLine;
+    case "Multi-Series Line Chart": return ChartJSLine;
     case "Pie Chart": return ChartJSPie;
     case "Doughnut Chart": return ChartJSDoughnut;
     case "Radar Chart": return ChartJSRadar;
@@ -107,6 +234,7 @@ function getChartJSComponent(type) {
     case "Bubble Chart": return ChartJSBubble;
     case "Scatter Plot": return ChartJSScatter;
     case "Waterfall Chart": return ChartJSBar;
+    case "Waterfall": return ChartJSBar;
     case "Gantt Chart": return ChartJSBar;
     case "Stacked Bar Chart": return ChartJSBar;
     default: return null;
@@ -115,7 +243,31 @@ function getChartJSComponent(type) {
 
 function getChartJSData(type, data) {
   // Convert normalized data to Chart.js format
-  if (["Bar Chart", "Line Chart"].includes(type)) {
+  if (["Bar Chart", "Line Chart", "Multi Series Line Chart", "Multi-Series Line Chart"].includes(type)) {
+    // If user provided Chart.js-style datasets or series, use them to build multi-series datasets
+    if (data && Array.isArray(data.datasets) && data.datasets.length > 0) {
+      const labels = Array.isArray(data.labels) ? data.labels : (Array.isArray(data) ? data.map(d => d.label) : []);
+      const datasets = data.datasets.map((ds, i) => ({
+        label: ds.label || `Series ${i + 1}`,
+        data: Array.isArray(ds.data) ? ds.data : [],
+        backgroundColor: ds.backgroundColor || DEFAULT_COLORS[i % DEFAULT_COLORS.length],
+        borderColor: ds.borderColor || ds.backgroundColor || DEFAULT_COLORS[i % DEFAULT_COLORS.length],
+        fill: ds.fill || (type === "Line Chart" ? false : true),
+      }));
+      return { labels, datasets };
+    }
+    if (data && Array.isArray(data.series) && data.series.length > 0 && Array.isArray(data.labels)) {
+      const labels = data.labels;
+      const datasets = data.series.map((s, i) => ({
+        label: s.name || `Series ${i + 1}`,
+        data: Array.isArray(s.values) ? s.values : [],
+        backgroundColor: s.color || DEFAULT_COLORS[i % DEFAULT_COLORS.length],
+        borderColor: s.color || DEFAULT_COLORS[i % DEFAULT_COLORS.length],
+        fill: s.fill || false,
+      }));
+      return { labels, datasets };
+    }
+    // Fallback single-series
     const arr = normalizeChartData(type, data);
     return {
       labels: arr.map(d => d.label),
@@ -322,7 +474,22 @@ export default function ChartRenderer({
             />
             <Tooltip wrapperStyle={{ fontSize: 13, fontFamily: 'Inter, Arial, sans-serif' }} />
             <Legend wrapperStyle={{ fontSize: 13, fontWeight: 600, color: '#4169e1' }} />
-            <Line type="monotone" dataKey="value" stroke={getColor(0)} strokeWidth={3} dot={{ r: 5 }} />
+            {
+              // If plotData rows contain multiple series keys (other than label), render each as a Line
+              (() => {
+                if (!Array.isArray(plotData) || plotData.length === 0) {
+                  return <Line type="monotone" dataKey="value" stroke={getColor(0)} strokeWidth={3} dot={{ r: 5 }} />;
+                }
+                const keys = Object.keys(plotData[0] || {}).filter(k => k !== 'label');
+                if (keys.length <= 1) {
+                  const key = keys[0] || 'value';
+                  return <Line type="monotone" dataKey={key} stroke={getColor(0)} strokeWidth={3} dot={{ r: 5 }} />;
+                }
+                return keys.map((k, idx) => (
+                  <Line key={`line-${k}`} type="monotone" dataKey={k} stroke={getColor(idx)} strokeWidth={3} dot={{ r: 4 }} />
+                ));
+              })()
+            }
           </LineChart>
         </ResponsiveContainer>
       ) : type === "Pie Chart" ? (
@@ -348,6 +515,36 @@ export default function ChartRenderer({
           </PieChart>
         </ResponsiveContainer>
       ) : null
+    );
+  } else if (type === "Histogram") {
+    // build histogram from raw values or single series
+    let histData = [];
+    if (Array.isArray(data)) {
+      histData = buildHistogramData(data.map(d => d.value));
+    } else if (data && Array.isArray(data.values)) {
+      histData = buildHistogramData(data.values);
+    } else if (data && Array.isArray(data.series) && data.series[0] && Array.isArray(data.series[0].values)) {
+      histData = buildHistogramData(data.series[0].values);
+    } else {
+      histData = buildHistogramData([]);
+    }
+    chartContent = (
+      <ResponsiveContainer width="100%" height={250}>
+        <BarChart data={histData} margin={{ top: 30, right: 40, left: 50, bottom: 40 }}>
+          <XAxis dataKey="label" />
+          <YAxis />
+          <Tooltip />
+          <Bar dataKey="value">
+            {histData.map((entry, index) => (<Cell key={index} fill={getColor(index)} />))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  } else if (type === "Heatmap") {
+    chartContent = (
+      <div style={{ padding: 8 }}>
+        <Heatmap data={data} palette={COLORS} />
+      </div>
     );
   } else if (type === "Gantt Chart") {
     // Chart.js stacked horizontal bar
@@ -393,11 +590,12 @@ export default function ChartRenderer({
         <ChartJSComponent
           data={chartJSData}
           options={{
+            indexAxis: 'y', // rotate bars horizontally
             responsive: true,
             plugins: { legend: { display: true }, title: { display: true, text: type } },
             scales: {
-              x: { stacked: false },
-              y: { stacked: false }
+              x: { stacked: true },
+              y: { stacked: true }
             },
             barPercentage: 0.7,
           }}

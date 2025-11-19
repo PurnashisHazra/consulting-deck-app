@@ -390,7 +390,7 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
     table_summaries = summarize_tables(payload.get('table_data'))
     financial_metrics = extract_financial_metrics(table_summaries)
     system_instructions = (
-        "You are a veteran McKinsey/BCG partner and expert in consulting slide design, . For each slide, provide: "
+        "You are a veteran McKinsey/BCG partner and expert in consulting slide design, structure and storytelling. For each slide, provide: "
         "1. Slide Archetype (e.g., Title-Content, Comparison, Timeline, Framework, Data Chart, etc.). "
         "2. Select the recommended layout from SLIDE_REPO according to the slide archetype, if available. If not, suggest a layout inspired by BCG/McKinsey slide layouts. "
         "3. For each grid section, specify: "
@@ -402,7 +402,8 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
         "Also, build an executive-ready consulting deck with detailed, comprehensive content. Expand the storyline into detailed, actionable insights. "
         "Use the provided repos to choose frameworks and chart types."
         "Be structured, comprehensive, and action-oriented."
-        "Get numerical statistics and data from legit sources."
+        "Get numerical statistics and data from legit sources. "
+        "For financials, do deep analysis and calculations as needed."
         "Mention sources. Output strictly valid JSON matching the response schema."
     )
     response_schema = {

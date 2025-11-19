@@ -2,1294 +2,987 @@ import { useState, useEffect, useRef } from "react";
 import Draggable from "react-draggable";
 import FrameworkDiagram from "./FrameworkDiagram";
 import ChartRenderer from "./ChartRenderer";
-import { getPalette, API_BASE_URL } from '../api';
+import { getPalette } from '../api';
 import SmartArtFlow from "./SmartArtFlow";
 import { readableTextOnAlphaBg, ensureHex, readableTextColor, blendWithWhite, rgbToHex } from '../utils/colorUtils';
 import EnrichConfirmModal from './EnrichConfirmModal';
 import { parseListItems } from '../utils/parseList';
 import { ENABLE_INLINE_EDITING } from '../config';
 
-// Accept setCurrentSlideIndex as a prop for navigation
 export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex = 0, setCurrentSlideIndex, optimizedStoryline, onGenerateMockSlides }) {
-  // Delete a canvas item by id
-  const handleDelete = (id) => {
-    setCanvasItems(items => items.filter(item => item.id !== id));
-  };
+    const [slideCanvasState, setSlideCanvasState] = useState({});
+    const [editingMap, setEditingMap] = useState({});
+    const [editingValues, setEditingValues] = useState({});
+    const [isFullScreen, setIsFullScreen] = useState(false);
+    const [clickPosition, setClickPosition] = useState({ x: 100, y: 100 });
+    const [selectedPalette, setSelectedPalette] = useState('consulting');
+    const [showPaletteSelector, setShowPaletteSelector] = useState(false);
+    const [borderWidth, setBorderWidth] = useState(3);
+    const [canvasBackgroundColor, setCanvasBackgroundColor] = useState('#e5e7eb');
+    const [showColorPicker, setShowColorPicker] = useState(false);
+    const [activeEditId, setActiveEditId] = useState(null);
+    const canvasRef = useRef(null);
 
-  // Render optimized storyline if present
-  const renderOptimizedStoryline = () => {
-    if (!optimizedStoryline || !Array.isArray(optimizedStoryline) || optimizedStoryline.length === 0) return null;
-    return (
-      <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-4 rounded">
-        <h3 className="text-lg font-bold text-blue-700 mb-2">Optimized Storyline</h3>
-        <ul className="list-disc ml-6 text-blue-900 text-sm">
-          {optimizedStoryline.map((point, idx) => (
-            <li key={idx}>{point}</li>
-          ))}
-        </ul>
-      </div>
-    );
-  };
+    // Professional consulting color palettes
+    const COLOR_PALETTES = {
+        default: [
+            { bg: '#e5e7eb', accent: '#374151' }, // Gray
+            { bg: '#d1fae5', accent: '#059669' }, // Emerald
+            { bg: '#fed7aa', accent: '#ea580c' }, // Orange
+            { bg: '#dbeafe', accent: '#2563eb' }, // Blue
+        ],
+        business: [
+            { bg: '#e5e7eb', accent: '#1f2937' }, // Dark gray
+            { bg: '#d1fae5', accent: '#10b981' }, // Green
+            { bg: '#fed7aa', accent: '#f59e0b' }, // Amber
+            { bg: '#dbeafe', accent: '#3b82f6' }, // Blue
+        ],
+        finance: [
+            { bg: '#dbeafe', accent: '#1e40af' }, // Navy blue
+            { bg: '#d1fae5', accent: '#047857' }, // Forest green
+            { bg: '#e5e7eb', accent: '#374151' }, // Slate
+            { bg: '#fef3c7', accent: '#d97706' }, // Gold
+        ],
+        technology: [
+            { bg: '#e0e7ff', accent: '#4f46e5' }, // Indigo
+            { bg: '#ccfbf1', accent: '#0d9488' }, // Teal
+            { bg: '#e5e7eb', accent: '#6b7280' }, // Cool gray
+            { bg: '#fce7f3', accent: '#db2777' }, // Pink
+        ],
+        healthcare: [
+            { bg: '#dbeafe', accent: '#2563eb' }, // Medical blue
+            { bg: '#d1fae5', accent: '#059669' }, // Health green
+            { bg: '#e5e7eb', accent: '#475569' }, // Neutral gray
+            { bg: '#f3e8ff', accent: '#9333ea' }, // Purple
+        ],
+        consulting: [
+            { bg: '#e5e7eb', accent: '#334155' }, // Professional gray
+            { bg: '#d1f4f0', accent: '#0f766e' }, // Consulting teal
+            { bg: '#fed7aa', accent: '#c2410c' }, // Warm orange
+            { bg: '#e0e7ff', accent: '#4338ca' }, // Deep indigo
+        ],
+    };
 
-  // Drag logic
-  const handleDrag = (e, data, id) => {
-    setCanvasItems(items =>
-      items.map(item =>
-        item.id === id ? { ...item, x: data.x, y: data.y } : item
-      )
-    );
-  };
-  // Store canvas state for each slide
-  const [slideCanvasState, setSlideCanvasState] = useState({});
-  // Editing helpers: temporary values for inline editing per item id
-  const [editingMap, setEditingMap] = useState({}); // { [id]: true }
-  const [editingValues, setEditingValues] = useState({}); // { [id]: string }
+    const LOCAL_PALETTE = COLOR_PALETTES[selectedPalette] || COLOR_PALETTES.consulting;
 
-  // Full screen toggle state
-  const [isFullScreen, setIsFullScreen] = useState(false);
-  // Ref to the main canvas container so we can export only this area
-  const canvasRef = useRef(null);
+    const [remotePalette, setRemotePalette] = useState(null);
+    const [isEnriching, setIsEnriching] = useState({});
+    const [enrichModal, setEnrichModal] = useState({ open: false, itemId: null, bullets: [] });
 
-  // Helper to generate default canvas items for a slide
-  // If slide.layout and slide.sections exist, use them to build items
-  // Local fallback palette used when AI palette isn't available
-  const LOCAL_PALETTE = [
-    { bg: '#f0f9ff', accent: '#2563eb' },
-    { bg: '#fff7ed', accent: '#f59e0b' },
-    { bg: '#ecfeff', accent: '#06b6d4' },
-    { bg: '#fef3f8', accent: '#ec4899' },
-    { bg: '#f0fdf4', accent: '#10b981' },
-    { bg: '#faf5ff', accent: '#8b5cf6' },
-  ];
+    const CARD_BG_BLEND = typeof process !== 'undefined' && process.env && process.env.REACT_APP_CARD_BLEND
+        ? Number(process.env.REACT_APP_CARD_BLEND)
+        : 0.12;
 
-  const [remotePalette, setRemotePalette] = useState(null);
-  const [isEnriching, setIsEnriching] = useState({});
-  const [enrichModal, setEnrichModal] = useState({ open: false, itemId: null, bullets: [] });
+    useEffect(() => {
+        let mounted = true;
+        getPalette().then(p => {
+            if (!mounted) return;
+            if (p && p.colors && Array.isArray(p.colors)) {
+                setRemotePalette(p.colors);
+            }
+        }).catch(() => { });
+        return () => { mounted = false };
+    }, []);
 
-  // Blend fraction for creating solid pastel backgrounds from accent colors.
-  // Can be overridden with environment variable REACT_APP_CARD_BLEND (e.g., 0.08 or 0.18).
-  const CARD_BG_BLEND = typeof process !== 'undefined' && process.env && process.env.REACT_APP_CARD_BLEND
-    ? Number(process.env.REACT_APP_CARD_BLEND)
-    : 0.12;
+    const DEFAULT_COLORS = ["#2563eb", "#06b6d4", "#8b5cf6", "#f59e0b", "#10b981", "#ef4444", "#fb7185"];
+    const COLORS = (remotePalette && Array.isArray(remotePalette) && remotePalette.length > 0) ? remotePalette : DEFAULT_COLORS;
 
-  useEffect(() => {
-    let mounted = true;
-    getPalette().then(p => {
-      if (!mounted) return;
-      if (p && p.colors && Array.isArray(p.colors)) {
-        setRemotePalette(p.colors);
-      }
-    }).catch(() => {
-      // ignore, fallback to local PALETTE
-    });
-    return () => { mounted = false };
-  }, []);
+    const getCardPalette = () => {
+        if (remotePalette && Array.isArray(remotePalette) && remotePalette.length > 0) {
+            return remotePalette.map(c => {
+                const raw = String(c || '').trim();
+                const ensure = ensureHex(raw);
+                const accent = ensure;
+                // Create very light background (90% blend with white)
+                const blended = blendWithWhite(ensure, 0.15);
+                const bg = rgbToHex(blended);
+                return { bg, accent };
+            });
+        }
+        return LOCAL_PALETTE;
+    };
 
-  const DEFAULT_COLORS = ["#2563eb", "#06b6d4", "#8b5cf6", "#f59e0b", "#10b981", "#ef4444", "#fb7185"];
-  const COLORS = (remotePalette && Array.isArray(remotePalette) && remotePalette.length > 0) ? remotePalette : DEFAULT_COLORS;
+    const CARD_PALETTE = getCardPalette();
 
-  // Derive a card palette (bg + accent) from the remotePalette hex array when possible
-  const getCardPalette = () => {
-    if (remotePalette && Array.isArray(remotePalette) && remotePalette.length > 0) {
-      // map each hex to an object with accent (hex) and bg (hex + alpha suffix)
-      return remotePalette.map(c => {
-          const raw = String(c || '').trim();
-          const ensure = ensureHex(raw);
-          const accent = ensure;
-          // Create a solid, pastel-like background by blending the accent with white
-    const blended = blendWithWhite(ensure, CARD_BG_BLEND); // configurable accent on white
-          const bg = rgbToHex(blended);
-          return { bg, accent };
+    // Update canvas background when palette changes
+    useEffect(() => {
+        if (CARD_PALETTE && CARD_PALETTE[0]) {
+            setCanvasBackgroundColor(CARD_PALETTE[0].bg);
+        }
+    }, [selectedPalette]);
+
+    // Canvas dimensions - match image proportions
+    const CANVAS_WIDTH = 1400;
+    const CANVAS_HEIGHT = 750;
+    const PADDING = 15;
+    const GAP = 15;
+
+    // Generate beautifully arranged canvas items from backend layout
+    const getDefaultCanvasItems = (slide) => {
+        if (!slide) return [];
+
+        console.log('Slide data:', slide);
+        const layout = slide.layout || { rows: 2, columns: 2 };
+        const sections = slide.sections || [];
+        console.log('Sections:', sections);
+
+        if (!sections || sections.length === 0) {
+            // Fallback: create default 2x2 layout
+            return createFallbackLayout(slide);
+        }
+
+        // Calculate cell dimensions based on layout
+        const rows = layout.rows || 2;
+        const cols = layout.columns || 2;
+
+        const availableWidth = CANVAS_WIDTH - (PADDING * 2) - (GAP * (cols - 1));
+        const availableHeight = CANVAS_HEIGHT - (PADDING * 2) - (GAP * (rows - 1));
+
+        const cellWidth = availableWidth / cols;
+        const cellHeight = availableHeight / rows;
+
+        return sections.map((section, idx) => {
+            // Get section position (1-indexed from backend, convert to 0-indexed)
+            const row = (section.row || 1) - 1;
+            const col = (section.col || 1) - 1;
+            const rowSpan = section.rowSpan || 1;
+            const colSpan = section.colSpan || 1;
+
+            // Calculate position and size
+            const x = PADDING + (col * (cellWidth + GAP));
+            const y = PADDING + (row * (cellHeight + GAP));
+            const width = (cellWidth * colSpan) + (GAP * (colSpan - 1));
+            const height = (cellHeight * rowSpan) + (GAP * (rowSpan - 1));
+
+            // Determine item type based on content
+            let itemType = 'custom';
+            if (section.charts && section.charts.length > 0) {
+                itemType = 'chart';
+            } else if (section.frameworks && section.frameworks.length > 0) {
+                itemType = 'framework';
+            }
+
+            // Process content
+            let contentData = section.content;
+            if (typeof contentData === 'string') {
+                contentData = parseListItems(contentData);
+            } else if (!Array.isArray(contentData)) {
+                contentData = [String(contentData || '')];
+            }
+
+            const item = {
+                id: section.id || `section-${idx}`,
+                title: section.title || section.name || `Section ${idx + 1}`,
+                type: itemType,
+                x,
+                y,
+                width,
+                height,
+                zIndex: idx,
+                data: contentData,
+                charts: section.charts || [],
+                chartType: section.charts?.[0] || null,
+                chartData: section.chart_data || {}, // This is an object like { "Bar Chart": { labels, values, ... } }
+                frameworks: section.frameworks || [],
+                frameworkData: section.framework_data || [], // This is an array like [{ "SWOT": {...} }, ...]
+                infographics: section.infographics || [],
+            };
+
+            console.log(`Section ${idx}:`, {
+                title: item.title,
+                type: itemType,
+                hasCharts: item.charts.length > 0,
+                chartData: item.chartData,
+                hasFrameworks: item.frameworks.length > 0,
+                frameworkData: item.frameworkData
+            });
+
+            return item;
         });
-    }
-    return LOCAL_PALETTE;
-  };
-
-  const CARD_PALETTE = getCardPalette();
-
-  const getDefaultCanvasItems = (slide) => {
-    if (!slide) return [];
-    // Helper: type-specific dummy data
-    const dummyFrameworks = {
-      "SWOT Analysis": {
-        Strengths: ["Strong brand", "Loyal customers"],
-        Weaknesses: ["Limited digital presence"],
-        Opportunities: ["Growing market"],
-        Threats: ["New competitors"]
-      },
-      "Ansoff Matrix": {
-        "Market Penetration": ["Increase marketing efforts"],
-        "Market Development": ["Expand to new regions"],
-        "Product Development": ["Launch new products"],
-        "Diversification": ["Enter new markets"]
-      },
-      "Porter's Five Forces": {
-        "Competitive Rivalry": ["High competition"],
-        "Supplier Power": ["Moderate"],
-        "Buyer Power": ["High"],
-        "Threat of Substitution": ["Low"],
-        "Threat of New Entry": ["Medium"]
-      }
-      // Add more as needed
     };
-    const dummyCharts = {
-      "Bar Chart": { labels: ["A", "B", "C"], values: [10, 20, 15] },
-      "Pie Chart": { labels: ["X", "Y", "Z"], values: [30, 40, 30] },
-      "Waterfall Chart": { steps: ["Start", "Add", "Subtract", "End"], values: [100, 50, -30, 120] }
-    };
-    // fallback to local palette within this function
-    const PALETTE = LOCAL_PALETTE;
 
-    if (slide.layout && Array.isArray(slide.sections)) {
-      // If any section requests a Gantt chart, render a full-slide Gantt that spans all rows/columns
-      const rows = slide.layout.rows || 1;
-      const cols = slide.layout.columns || 1;
-      const ganttSection = (slide.sections || []).find(sec => (sec.chartType === 'Gantt Chart' || (sec.charts && sec.charts.includes && sec.charts.includes('Gantt Chart')) || (sec.visualization && /gantt/i.test(sec.visualization))));
-      if (ganttSection) {
-        // Build gantt data by preferring explicit labels/datasets from section.chart_data or section.data
-        const s = ganttSection;
-        let labels = [];
-        let datasets = [];
-        if (s.chart_data && s.chart_data.labels) {
-          labels = s.chart_data.labels;
-        } else if (s.data && s.data.labels) {
-          labels = s.data.labels;
-        } else if (Array.isArray(s.data) && s.data.length > 0) {
-          labels = s.data.map(d => d.label || d.name || `Item ${Math.random().toString(36).slice(2,6)}`);
-        }
-        // collect datasets from section data if present
-        if (s.chart_data && Array.isArray(s.chart_data.datasets)) {
-          datasets = s.chart_data.datasets;
-        } else if (s.data && s.data.dataset1) {
-          // legacy dataset names
-          datasets = [];
-          if (Array.isArray(s.data.dataset1)) datasets.push({ label: 'A', data: s.data.dataset1, backgroundColor: s.data.colors || COLORS[0] });
-          if (Array.isArray(s.data.dataset2)) datasets.push({ label: 'B', data: s.data.dataset2, backgroundColor: s.data.colors || COLORS[1] });
-        }
-        // fallback: synthesize from slide.data or dummy
-        if ((!labels || labels.length === 0) && slide.data && Array.isArray(slide.data)) {
-          labels = slide.data.map(d => d.label || d.name || `Item ${Math.random().toString(36).slice(2,6)}`);
-        }
-        if ((!datasets || datasets.length === 0) && slide.data && Array.isArray(slide.data)) {
-          // create a single dataset from numeric values if possible
-          datasets = [{ label: 'Series', data: slide.data.map(d => d.value || 0), backgroundColor: COLORS[0] }];
-        }
-        // If still empty, fallback to dummy
-        if (!labels || labels.length === 0) labels = ['A','B','C'];
-        if (!datasets || datasets.length === 0) datasets = [{ label: 'Series', data: [10,20,30], backgroundColor: COLORS[0] }];
+    const createFallbackLayout = (slide) => {
+        // Create default 2x2 grid layout
+        const availableWidth = CANVAS_WIDTH - (PADDING * 2) - GAP;
+        const availableHeight = CANVAS_HEIGHT - (PADDING * 2) - GAP;
+        const cellWidth = availableWidth / 2;
+        const cellHeight = availableHeight / 2;
 
         return [
-          {
-            id: `gantt-full`,
-            title: slide.title || 'Gantt',
-            type: 'chart',
-            gridRow: 1,
-            gridCol: 1,
-            rowSpan: rows,
-            colSpan: cols,
-            x: 0,
-            y: 0,
-            width: 1000,
-            height: 600,
-            data: { labels, datasets },
-            chartType: 'Gantt Chart',
-            chartData: { labels, datasets },
-          }
+            {
+                id: "chart",
+                title: "Chart",
+                type: "chart",
+                x: PADDING,
+                y: PADDING,
+                width: cellWidth,
+                height: cellHeight,
+                zIndex: 0,
+                chartType: slide.visualization,
+                chartData: slide.data || {},
+                data: [],
+            },
+            {
+                id: "frameworks",
+                title: "Frameworks",
+                type: "framework",
+                x: PADDING + cellWidth + GAP,
+                y: PADDING,
+                width: cellWidth,
+                height: cellHeight,
+                zIndex: 1,
+                frameworks: slide.frameworks || [],
+                frameworkData: slide.framework_data || [],
+                data: slide.frameworks || [],
+            },
+            {
+                id: "keyPoints",
+                title: "Key Points",
+                type: "keyPoints",
+                x: PADDING,
+                y: PADDING + cellHeight + GAP,
+                width: cellWidth,
+                height: cellHeight,
+                zIndex: 2,
+                data: Array.isArray(slide.content) ? slide.content : parseListItems(slide.content || ''),
+            },
+            {
+                id: "takeaway",
+                title: "Insights",
+                type: "takeaway",
+                x: PADDING + cellWidth + GAP,
+                y: PADDING + cellHeight + GAP,
+                width: cellWidth,
+                height: cellHeight,
+                zIndex: 3,
+                data: {
+                    takeaway: slide.takeaway || '',
+                    call_to_action: slide.call_to_action || ''
+                },
+            },
         ];
-      }
+    };
 
-  return slide.sections.map((section, idx) => {
-        // Content
-        let content = section.content;
-        const hasCharts = section.charts && section.charts.length > 0;
-        const hasFrameworks = section.frameworks && section.frameworks.length > 0;
+    const currentSlide = slides && slides.length > 0 ? slides[currentSlideIndex] : null;
+    const canvasItems = slideCanvasState[currentSlideIndex] || getDefaultCanvasItems(currentSlide);
 
-        // If empty and there are no charts/frameworks, try slide-level fallbacks
-        if ((!content || (typeof content === 'string' && content.trim() === '')) && !hasCharts && !hasFrameworks) {
-          // prefer slide.content (array or string)
-          if (Array.isArray(slide.content) && slide.content.length > 0) {
-            // use nth content if available, else first
-            content = slide.content[idx] || slide.content[0];
-          } else if (typeof slide.content === 'string' && slide.content.trim()) {
-            content = slide.content;
-          } else if (slide.takeaway) {
-            content = slide.takeaway;
-          } else {
-            // derive from dummy data labels
-            const dummy = (slide.data && Array.isArray(slide.data) && slide.data.length > 0) ? slide.data[(idx) % slide.data.length] : null;
-            content = (dummy && (dummy.label || dummy.name)) ? `Data point: ${dummy.label || dummy.name}` : `No AI data for this section. Example: ${section.title || 'Section'} content.`;
-          }
-        }
-        // Chart Data
-        let chartType = section.chartType || (section.charts && section.charts.length > 0 ? section.charts[0] : null);
-        let chartData = null;
-        if (chartType && section.chart_data && typeof section.chart_data === 'object') {
-          chartData = section.chart_data[chartType];
-        }
-        // Fallback to dummy if no chartData
-        if (chartType && !chartData) {
-          chartData = dummyCharts[chartType] || { labels: ["Sample"], values: [1] };
-        }
-        // Framework Data
-        let frameworkData = section.framework_data;
-        if (section.frameworks && section.frameworks.length > 0) {
-          if (!frameworkData || frameworkData.length === 0) {
-            // If expecting array of objects [{framework_name: {...}}]
-            frameworkData = section.frameworks.map(fw => ({ [fw]: dummyFrameworks[fw] || { Example: ["Sample data"] } }));
-          }
-        }
-        // Determine how much content to show based on grid area
-        const rowSpan = section.rowSpan || 1;
-        const colSpan = section.colSpan || 1;
-        const area = Math.max(1, rowSpan * colSpan);
-        const targetPoints = Math.max(3, area * 2); // aim for at least 3, more for larger slots
+    const setCanvasItems = (newItemsOrUpdater) => {
+        setSlideCanvasState(prev => {
+            const newItems = typeof newItemsOrUpdater === 'function' ? newItemsOrUpdater(canvasItems) : newItemsOrUpdater;
+            return { ...prev, [currentSlideIndex]: newItems };
+        });
+    };
 
-        // Build dataForRender as array when appropriate
-        let dataForRender = null;
-        if (Array.isArray(content)) {
-          dataForRender = content.slice();
-        } else if (typeof content === 'string') {
-          // Split into list items but preserve numbered prefixes like "1. ..."
-          const parts = parseListItems(content);
-          if (parts.length >= targetPoints) {
-            dataForRender = parts;
-          } else {
-            // try to augment from slide.content or takeaway or dummy labels
-            dataForRender = parts.slice();
-            if (Array.isArray(slide.content) && slide.content.length > 0) {
-              for (let i = 0; dataForRender.length < targetPoints && i < slide.content.length; i++) {
-                const candidate = slide.content[i];
-                if (candidate && !dataForRender.includes(candidate)) dataForRender.push(candidate);
-              }
-            } else if (typeof slide.content === 'string' && slide.content.trim()) {
-              const more = parseListItems(slide.content);
-              for (let m of more) {
-                if (dataForRender.length >= targetPoints) break;
-                if (!dataForRender.includes(m)) dataForRender.push(m);
-              }
-            }
-            if (dataForRender.length < targetPoints && slide.takeaway) {
-              const tparts = parseListItems(slide.takeaway);
-              for (let t of tparts) {
-                if (dataForRender.length >= targetPoints) break;
-                if (!dataForRender.includes(t)) dataForRender.push(t);
-              }
-            }
-            // finally fill with dummy labels
-            if (dataForRender.length < targetPoints) {
-              const dummyList = (slide.data && Array.isArray(slide.data)) ? slide.data : (dummyCharts[slide.visualization] ? [dummyCharts[slide.visualization]] : []);
-              let k = 0;
-              while (dataForRender.length < targetPoints) {
-                const dd = dummyList[k % Math.max(1, dummyList.length)];
-                const label = (dd && (dd.label || dd.name)) ? (dd.label || dd.name) : `Point ${k+1}`;
-                dataForRender.push(label);
-                k++;
-                if (k > 20) break; // safety
-              }
-            }
-          }
-        } else if (content == null) {
-          dataForRender = [];
-          // fill from slide.content or takeaway
-          if (Array.isArray(slide.content) && slide.content.length > 0) {
-            dataForRender = slide.content.slice(0, targetPoints);
-          } else if (typeof slide.content === 'string' && slide.content.trim()) {
-            dataForRender = parseListItems(slide.content).slice(0, targetPoints);
-          }
-          if (dataForRender.length < targetPoints && slide.takeaway) {
-            dataForRender.push(slide.takeaway);
-          }
-          while (dataForRender.length < targetPoints) {
-            dataForRender.push(`No content available.`);
-            if (dataForRender.length > 20) break;
-          }
-        } else {
-          dataForRender = [String(content)];
-        }
+    const handleDrag = (e, data, id) => {
+        setCanvasItems(items =>
+            items.map(item =>
+                item.id === id ? { ...item, x: data.x, y: data.y } : item
+            )
+        );
+    };
 
-        // If this section actually contains charts or frameworks, prefer leaving data as-is (don't overwhelm charts)
-        const finalData = (hasCharts || hasFrameworks) ? content : dataForRender;
+    const handleResizeStart = (e, id) => {
+        e.stopPropagation();
+        const item = canvasItems.find(it => it.id === id);
+        if (!item) return;
 
-        return {
-          id: section.id || `section-${idx}`,
-          // provide both title and type so renderer shows header correctly
-          title: section.title || section.name || `Section ${idx + 1}`,
-          type: section.title || 'custom',
-          gridRow: section.row,
-          gridCol: section.col,
-          rowSpan: section.rowSpan || 1,
-          colSpan: section.colSpan || 1,
-          x: 0,
-          y: 0,
-          width: 640,
-          height: 360,
-          data: finalData,
-          charts: section.charts || [],
-          chartType,
-          chartData,
-          frameworkData,
-          infographics: section.infographics || [],
+        const startX = e.clientX;
+        const startY = e.clientY;
+        setCanvasItems(items =>
+            items.map(it =>
+                it.id === id
+                    ? { ...it, resizing: true, startX, startY, startWidth: it.width, startHeight: it.height }
+                    : it
+            )
+        );
+        document.body.style.cursor = "nwse-resize";
+    };
+
+    const handleResize = (e, id) => {
+        const item = canvasItems.find(it => it.id === id && it.resizing);
+        if (!item) return;
+        const dx = e.clientX - item.startX;
+        const dy = e.clientY - item.startY;
+        setCanvasItems(items =>
+            items.map(it =>
+                it.id === id
+                    ? { ...it, width: Math.max(200, item.startWidth + dx), height: Math.max(150, item.startHeight + dy) }
+                    : it
+            )
+        );
+    };
+
+    const handleResizeEnd = (e, id) => {
+        setCanvasItems(items =>
+            items.map(it => it.id === id ? { ...it, resizing: false } : it)
+        );
+        document.body.style.cursor = "default";
+    };
+
+    const handleDelete = (id) => {
+        setCanvasItems(items => items.filter(item => item.id !== id));
+    };
+
+    const bringToFront = (id) => {
+        const maxZ = Math.max(...canvasItems.map(it => it.zIndex || 0), 0);
+        setCanvasItems(items =>
+            items.map(it => it.id === id ? { ...it, zIndex: maxZ + 1 } : it)
+        );
+    };
+
+    const sendToBack = (id) => {
+        const minZ = Math.min(...canvasItems.map(it => it.zIndex || 0), 0);
+        setCanvasItems(items =>
+            items.map(it => it.id === id ? { ...it, zIndex: minZ - 1 } : it)
+        );
+    };
+
+    const addNewItem = (type = 'custom') => {
+        const newItem = {
+            id: `item-${Date.now()}`,
+            title: 'New Section',
+            type: type,
+            x: clickPosition.x,
+            y: clickPosition.y,
+            width: 400,
+            height: 300,
+            zIndex: Math.max(...canvasItems.map(it => it.zIndex || 0), 0) + 1,
+            data: ['New content point'],
         };
-      });
-    }
-    // fallback to old layout
-    return [
-      { id: "chart", type: "chart", gridArea: "topLeft", x: 0, y: 0, width: 640, height: 360, data: slide.chart_data, chartType: slide.visualization, chartData: slide.data || dummyCharts[slide.visualization] || { labels: ["Sample"], values: [1] } },
-      { id: "frameworks", type: "frameworks", gridArea: "topRight", x: 0, y: 0, width: 640, height: 360, data: slide.frameworks || [], frameworkData: slide.framework_data || {}, },
-      { id: "keyPoints", type: "keyPoints", gridArea: "bottomLeft", x: 0, y: 0, width: 640, height: 360, data: slide.content || ["No AI key points. Example: Key point 1."] },
-      { id: "takeaway", type: "takeaway", gridArea: "bottomRight", x: 0, y: 0, width: 640, height: 360, data: { takeaway: slide.takeaway || 'No AI insight. Example: Key insight.', call_to_action: slide.call_to_action || 'No AI next step. Example: Next step.' } },
-    ];
-  };
+        setCanvasItems(items => [...items, newItem]);
+    };
 
-  // Get current slide's canvas items, falling back to default if not set
-  const currentSlide = slides && slides.length > 0 ? slides[currentSlideIndex] : null;
-  const canvasItems = slideCanvasState[currentSlideIndex] || getDefaultCanvasItems(currentSlide);
-
-  // Save changes to canvas state for current slide
-  const setCanvasItems = (newItemsOrUpdater) => {
-    setSlideCanvasState(prev => {
-      const newItems = typeof newItemsOrUpdater === 'function' ? newItemsOrUpdater(canvasItems) : newItemsOrUpdater;
-      return { ...prev, [currentSlideIndex]: newItems };
-    });
-  };
-
-  const enrichSection = async (itemId, numPoints = 3) => {
-    // Open modal with current content; modal will call the backend when user presses Enrich with AI
-    const item = canvasItems.find(it => it.id === itemId);
-    if (!item) return;
-    const initial = Array.isArray(item.data) ? item.data.join('\n') : String(item.data || '');
-    setEnrichModal({ open: true, itemId, initialContent: initial });
-  };
-
-  const applyEnrichedContent = (itemId, newContent) => {
-    if (itemId == null) return;
-    // Replace current content with newContent; try to coerce into array if multiple lines
-    const parsed = newContent.split('\n').map(s => s.trim()).filter(Boolean);
-    const final = parsed.length > 1 ? parsed : (parsed[0] || newContent);
-    setCanvasItems(items => items.map(it => it.id === itemId ? { ...it, data: final } : it));
-    setEnrichModal({ open: false, itemId: null, initialContent: '' });
-  };
-
-  // Add a blank line to an item's data and open inline editor for quick editing.
-  const addBlankLineToItem = (itemId) => {
-    const item = canvasItems.find(it => it.id === itemId);
-    if (!item) return;
-    // If array, append empty string
-    if (Array.isArray(item.data)) {
-      const newData = [...item.data, ''];
-      setCanvasItems(items => items.map(it => it.id === itemId ? { ...it, data: newData } : it));
-      setEditingValues(prev => ({ ...prev, [itemId]: newData.join('\n') }));
-      setEditingMap(prev => ({ ...prev, [itemId]: true }));
-      return;
-    }
-    // If string, parse into list items and append
-    if (typeof item.data === 'string') {
-      try {
-        const parts = parseListItems(item.data).map(s => s.trim()).filter(Boolean);
-        const newData = parts.length > 0 ? [...parts, ''] : [item.data, ''];
-        setCanvasItems(items => items.map(it => it.id === itemId ? { ...it, data: newData } : it));
-        setEditingValues(prev => ({ ...prev, [itemId]: newData.join('\n') }));
-        setEditingMap(prev => ({ ...prev, [itemId]: true }));
-        return;
-      } catch (err) {
-        // fallback: convert to array
-        const newData = [String(item.data || ''), ''];
-        setCanvasItems(items => items.map(it => it.id === itemId ? { ...it, data: newData } : it));
-        setEditingValues(prev => ({ ...prev, [itemId]: newData.join('\n') }));
-        setEditingMap(prev => ({ ...prev, [itemId]: true }));
-        return;
-      }
-    }
-    // For objects or other types, coerce to a simple array with an empty second line
-    const newData = [typeof item.data === 'object' ? JSON.stringify(item.data) : String(item.data || ''), ''];
-    setCanvasItems(items => items.map(it => it.id === itemId ? { ...it, data: newData } : it));
-    setEditingValues(prev => ({ ...prev, [itemId]: newData.join('\n') }));
-    setEditingMap(prev => ({ ...prev, [itemId]: true }));
-  };
-
-  // Reset canvas state if slides change (e.g., new deck generated)
-  useEffect(() => {
-    setSlideCanvasState({});
-  }, [slides]);
-
-  // Ensure canvas state for current slide is initialized on navigation
-  useEffect(() => {
-    if (currentSlide && !slideCanvasState.hasOwnProperty(currentSlideIndex)) {
-      setSlideCanvasState(prev => ({
-        ...prev,
-        [currentSlideIndex]: getDefaultCanvasItems(currentSlide)
-      }));
-    }
-  }, [currentSlideIndex, slides]);
-
-  // Helper component to listen for mousemove/up during resize
-  function ResizeListener({ id, onResize, onResizeEnd }) {
-    useEffect(() => {
-      const handleMove = (e) => onResize(e, id);
-      const handleUp = (e) => {
-        onResizeEnd(e, id);
-        window.removeEventListener("mousemove", handleMove);
-        window.removeEventListener("mouseup", handleUp);
-      };
-      window.addEventListener("mousemove", handleMove);
-      window.addEventListener("mouseup", handleUp);
-      return () => {
-        window.removeEventListener("mousemove", handleMove);
-        window.removeEventListener("mouseup", handleUp);
-      };
-    }, [id, onResize, onResizeEnd]);
-    return null;
-  }
-  // Resize logic
-  const handleResizeStart = (e, id) => {
-    e.stopPropagation();
-    const startX = e.clientX;
-    const startY = e.clientY;
-    setCanvasItems(items =>
-      items.map(item =>
-        item.id === id
-          ? { ...item, resizing: true, startX, startY, startWidth: item.width, startHeight: item.height }
-          : item
-      )
-    );
-    document.body.style.cursor = "nwse-resize";
-  };
-
-  // Start editing an item (prefill editingValues based on type)
-  const startEditItem = (id) => {
-    const item = canvasItems.find(it => it.id === id);
-    if (!item) return;
-    let initial = '';
-    try {
-      // Prefer human-friendly editable text instead of JSON
-      if (item.type === 'frameworks') {
-        // frameworks have a custom table editor elsewhere; keep JSON to feed that UI
-        initial = JSON.stringify(item.frameworkData || item.data || {}, null, 2);
-      } else if (item.type === 'chart') {
-        // For charts, show labels or array data as newline-separated list where possible
-        if (item.chartData && Array.isArray(item.chartData.labels)) {
-          initial = item.chartData.labels.join('\n');
-        } else if (Array.isArray(item.data)) {
-          initial = item.data.join('\n');
-        } else if (typeof item.data === 'object' && item.data !== null) {
-          initial = Object.entries(item.data).map(([k, v]) => Array.isArray(v) ? `${k}: ${v.join(', ')}` : `${k}: ${v}`).join('\n');
-        } else {
-          initial = String(item.data || '');
-        }
-      } else if (Array.isArray(item.data)) {
-        initial = item.data.join('\n');
-      } else if (typeof item.data === 'object' && item.data !== null) {
-        // Convert object into key: value human readable lines
-        initial = Object.entries(item.data).map(([k, v]) => Array.isArray(v) ? `${k}: ${v.join(', ')}` : `${k}: ${v}`).join('\n');
-      } else {
-        initial = String(item.data || '');
-      }
-    } catch (err) {
-      initial = String(item.data || '');
-    }
-    setEditingValues(prev => ({ ...prev, [id]: initial }));
-    setEditingMap(prev => ({ ...prev, [id]: true }));
-  };
-
-  const cancelEditItem = (id) => {
-    setEditingMap(prev => { const n = { ...prev }; delete n[id]; return n; });
-    setEditingValues(prev => { const n = { ...prev }; delete n[id]; return n; });
-  };
-
-  const onEditChange = (id, v) => {
-    setEditingValues(prev => ({ ...prev, [id]: v }));
-  };
-
-  const saveEditItem = (id) => {
-    const raw = (editingValues[id] || '').trim();
-    setCanvasItems(items => items.map(item => {
-      if (item.id !== id) return item;
-      try {
-        if (item.type === 'chart') {
-          // Accept JSON if provided, otherwise treat input as newline labels list
-          if (raw.startsWith('{') || raw.startsWith('[')) {
-            const parsed = JSON.parse(raw);
-            return { ...item, chartData: parsed, data: parsed };
-          }
-          const labels = raw.split('\n').map(s => s.trim()).filter(Boolean);
-          const chartObj = { labels };
-          return { ...item, chartData: chartObj, data: labels };
-        } else if (item.type === 'frameworks') {
-          const parsed = raw ? JSON.parse(raw) : {};
-          // try to keep framework list in item.data if keys exist
-          return { ...item, frameworkData: parsed };
-        } else if (item.type === 'takeaway' && typeof item.data === 'object') {
-          // For takeaway, if JSON provided parse, else split lines into object
-          if (raw.startsWith('{') || raw.startsWith('[')) {
-            const parsed = JSON.parse(raw);
-            return { ...item, data: parsed };
-          } else {
-            const lines = raw.split('\n').map(s => s.trim()).filter(Boolean);
-            const takeaway = lines[0] || '';
-            const call_to_action = lines[1] || '';
-            return { ...item, data: { takeaway, call_to_action } };
-          }
-        } else {
-          // Generic: if original data was an object, parse key:value lines into object
-          const wasObject = typeof item.data === 'object' && item.data !== null && !Array.isArray(item.data);
-          if (wasObject) {
-            if (raw.startsWith('{') || raw.startsWith('[')) {
-              const parsed = JSON.parse(raw);
-              return { ...item, data: parsed };
-            }
-            const lines = raw.split('\n').map(s => s.trim()).filter(Boolean);
-            const parsedObj = {};
-            lines.forEach(ln => {
-              const idx = ln.indexOf(':');
-              if (idx > -1) {
-                const key = ln.slice(0, idx).trim();
-                const rest = ln.slice(idx + 1).trim();
-                if (rest.includes(',')) {
-                  parsedObj[key] = rest.split(',').map(s => s.trim()).filter(Boolean);
-                } else {
-                  parsedObj[key] = rest;
-                }
-              }
+    const handleCanvasClick = (e) => {
+        if (e.target === canvasRef.current) {
+            const rect = canvasRef.current.getBoundingClientRect();
+            setClickPosition({
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top
             });
-            return { ...item, data: parsedObj };
-          }
-          // Otherwise try JSON, else lines/primitive
-          if (raw.startsWith('{') || raw.startsWith('[')) {
-            const parsed = JSON.parse(raw);
-            return { ...item, data: parsed };
-          }
-          const lines = raw.split('\n').map(s => s.trim()).filter(Boolean);
-          return { ...item, data: lines.length > 1 ? lines : raw };
         }
-      } catch (err) {
-        window.alert('Failed to parse edited value. Please ensure JSON is valid for charts/frameworks. ' + err.message);
-        return item;
-      }
-    }));
-    cancelEditItem(id);
-  };
-  // Throttle resize updates using requestAnimationFrame to avoid layout thrash / ResizeObserver loops
-  const resizePendingRef = useRef(null);
-  const resizeScheduledRef = useRef(false);
+    };
 
-  const flushResize = () => {
-    const pending = resizePendingRef.current;
-    if (!pending) {
-      resizeScheduledRef.current = false;
-      return;
-    }
-    const { id, clientX, clientY } = pending;
-    // Apply a single state update based on the last mouse position
-    setCanvasItems(items =>
-      items.map(item => {
-        if (item.id === id && item.resizing) {
-          const deltaX = clientX - item.startX;
-          const deltaY = clientY - item.startY;
-          return {
-            ...item,
-            width: Math.max(120, item.startWidth + deltaX),
-            height: Math.max(80, item.startHeight + deltaY)
-          };
+    const enrichSection = async (itemId, numPoints = 3) => {
+        const item = canvasItems.find(it => it.id === itemId);
+        if (!item) return;
+        const initial = Array.isArray(item.data) ? item.data.join('\n') : String(item.data || '');
+        setEnrichModal({ open: true, itemId, initialContent: initial });
+    };
+
+    const applyEnrichedContent = (itemId, newContent) => {
+        if (itemId == null) return;
+        const parsed = newContent.split('\n').map(s => s.trim()).filter(Boolean);
+        const final = parsed.length > 1 ? parsed : (parsed[0] || newContent);
+        setCanvasItems(items => items.map(it => it.id === itemId ? { ...it, data: final } : it));
+        setEnrichModal({ open: false, itemId: null, initialContent: '' });
+    };
+
+    // PowerPoint-style inline editing - edit directly without HTML inputs
+    const handleContentEdit = (id, field, value) => {
+        setCanvasItems(items =>
+            items.map(it => {
+                if (it.id === id) {
+                    if (field === 'title') {
+                        return { ...it, title: value };
+                    } else if (field === 'data') {
+                        return { ...it, data: value };
+                    } else if (field === 'takeaway') {
+                        return { ...it, data: { ...it.data, takeaway: value } };
+                    } else if (field === 'call_to_action') {
+                        return { ...it, data: { ...it.data, call_to_action: value } };
+                    }
+                }
+                return it;
+            })
+        );
+    };
+
+    const handleListItemEdit = (id, index, value) => {
+        setCanvasItems(items =>
+            items.map(it => {
+                if (it.id === id && Array.isArray(it.data)) {
+                    const newData = [...it.data];
+                    newData[index] = value;
+                    return { ...it, data: newData };
+                }
+                return it;
+            })
+        );
+    };
+
+    const addListItem = (id) => {
+        setCanvasItems(items =>
+            items.map(it => {
+                if (it.id === id) {
+                    const newData = Array.isArray(it.data) ? [...it.data, 'New point'] : [String(it.data || ''), 'New point'];
+                    return { ...it, data: newData };
+                }
+                return it;
+            })
+        );
+    };
+
+    const deleteListItem = (id, index) => {
+        setCanvasItems(items =>
+            items.map(it => {
+                if (it.id === id && Array.isArray(it.data)) {
+                    const newData = it.data.filter((_, i) => i !== index);
+                    return { ...it, data: newData };
+                }
+                return it;
+            })
+        );
+    };
+
+    useEffect(() => {
+        setSlideCanvasState({});
+    }, [slides]);
+
+    useEffect(() => {
+        if (currentSlide && !slideCanvasState.hasOwnProperty(currentSlideIndex)) {
+            setSlideCanvasState(prev => ({
+                ...prev,
+                [currentSlideIndex]: getDefaultCanvasItems(currentSlide)
+            }));
         }
-        return item;
-      })
-    );
-    // clear pending and allow future scheduling
-    resizePendingRef.current = null;
-    resizeScheduledRef.current = false;
-  };
+    }, [currentSlideIndex, slides]);
 
-  const handleResize = (e, id) => {
-    // store latest mouse position and schedule RAF if not already
-    resizePendingRef.current = { id, clientX: e.clientX, clientY: e.clientY };
-    if (!resizeScheduledRef.current) {
-      resizeScheduledRef.current = true;
-      window.requestAnimationFrame(flushResize);
-    }
-  };
-
-  const handleResizeEnd = (e, id) => {
-    // Ensure final pending resize is flushed synchronously before clearing resizing flag
-    if (resizePendingRef.current && resizePendingRef.current.id === id) {
-      // apply final
-      const pending = resizePendingRef.current;
-      setCanvasItems(items =>
-        items.map(item => {
-          if (item.id === pending.id && item.resizing) {
-            const deltaX = pending.clientX - item.startX;
-            const deltaY = pending.clientY - item.startY;
-            return {
-              ...item,
-              width: Math.max(120, item.startWidth + deltaX),
-              height: Math.max(80, item.startHeight + deltaY),
-              resizing: false
+    function ResizeListener({ id, onResize, onResizeEnd }) {
+        useEffect(() => {
+            const handleMove = (e) => onResize(e, id);
+            const handleUp = (e) => {
+                onResizeEnd(e, id);
+                window.removeEventListener("mousemove", handleMove);
+                window.removeEventListener("mouseup", handleUp);
             };
-          }
-          return item;
-        })
-      );
-      resizePendingRef.current = null;
-      resizeScheduledRef.current = false;
-    } else {
-      setCanvasItems(items =>
-        items.map(item =>
-          item.id === id ? { ...item, resizing: false } : item
-        )
-      );
+            window.addEventListener("mousemove", handleMove);
+            window.addEventListener("mouseup", handleUp);
+            return () => {
+                window.removeEventListener("mousemove", handleMove);
+                window.removeEventListener("mouseup", handleUp);
+            };
+        }, [id, onResize, onResizeEnd]);
+        return null;
     }
-    document.body.style.cursor = "default";
-  };
 
-  return (
-    <>
+    const renderOptimizedStoryline = () => {
+        if (!optimizedStoryline || !Array.isArray(optimizedStoryline) || optimizedStoryline.length === 0) return null;
+        return (
+            <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-4 rounded">
+                <h3 className="text-lg font-bold text-blue-700 mb-2">Optimized Storyline</h3>
+                <ul className="list-disc ml-6 text-blue-900 text-sm">
+                    {optimizedStoryline.map((point, idx) => (
+                        <li key={idx}>{point}</li>
+                    ))}
+                </ul>
+            </div>
+        );
+    };
 
-      {/* Linear Flow Navigation + Generate Mock Slides Button */}
-      <div className="bg-white border border-gray-200 rounded-lg p-4 mb-4">
-        <div className="flex items-center justify-between">
-          <button
-            onClick={() => setCurrentSlideIndex && setCurrentSlideIndex(Math.max(0, currentSlideIndex - 1))}
-            disabled={currentSlideIndex === 0}
-            className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400 rounded-lg transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            <span className="text-sm font-medium">Previous</span>
-          </button>
+    if (!currentSlide) {
+        return (
+            <div className="flex items-center justify-center h-96 bg-gray-50 rounded-lg">
+                <p className="text-gray-500">No slides available</p>
+            </div>
+        );
+    }
 
-          <div className="flex-1 mx-6">
-            <div className="flex items-center justify-center space-x-2">
-              {slides.map((slide, index) => (
-                <div key={slide.slide_number || index} className="flex items-center">
-                  <button
-                    onClick={() => setCurrentSlideIndex && setCurrentSlideIndex(index)}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${index === currentSlideIndex
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
-                  >
-                    <div className="text-center">
-                      <div className="text-xs text-gray-500 mb-1">Slide {slide.slide_number || index + 1}</div>
-                      <div className="max-w-32 truncate">{slide.title}</div>
+    return (
+        <>
+            {renderOptimizedStoryline()}
+
+            <div className="mb-4 flex items-center justify-between">
+                <div>
+                    <h2 className="text-2xl font-bold text-gray-800">{currentSlide.title}</h2>
+                    <p className="text-sm text-gray-600">Slide {currentSlideIndex + 1} of {slides.length}</p>
+                </div>
+
+                {/* Design Controls */}
+                <div className="flex items-center gap-3">
+                    {/* Border Width Selector */}
+                    <div className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg">
+                        <span className="text-xs font-medium text-gray-700">Border:</span>
+                        <select
+                            value={borderWidth}
+                            onChange={(e) => setBorderWidth(Number(e.target.value))}
+                            className="text-sm border-none bg-transparent outline-none cursor-pointer"
+                        >
+                            <option value={1}>1px</option>
+                            <option value={2}>2px</option>
+                            <option value={3}>3px</option>
+                            <option value={4}>4px</option>
+                            <option value={5}>5px</option>
+                        </select>
                     </div>
-                  </button>
-                  {index < slides.length - 1 && (
-                    <svg className="w-4 h-4 text-gray-400 mx-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
 
-          <button
-            onClick={() => setCurrentSlideIndex && setCurrentSlideIndex(Math.min(slides.length - 1, currentSlideIndex + 1))}
-            disabled={currentSlideIndex === slides.length - 1}
-            className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400 rounded-lg transition-colors"
-          >
-            <span className="text-sm font-medium">Next</span>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
-
-          {/* Generate Mock Slides Button */}
-
-        </div>
-      </div>
-
-      {/* Slide Title */}
-      <div className="w-full flex flex-col items-start px-8 mb-2">
-        <h2 className="text-3xl font-extrabold text-gray-900 mb-2">{currentSlide?.title}</h2>
-        <div className="w-16 h-1 bg-blue-600 mb-2"></div>
-      </div>
-
-      {/* Optimized Storyline - always visible above canvas grid */}
-      {/* {renderOptimizedStoryline()} */}
-      {optimizedStoryline && optimizedStoryline.length > 0 && (
-        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-6 mb-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Optimized Storyline</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {optimizedStoryline.map((point, index) => (
-              <div key={index} className="bg-white border border-blue-200 rounded-lg p-4">
-                <div className="flex items-start space-x-3">
-                  <div className="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
-                    {index + 1}
-                  </div>
-                  <p className="text-sm text-gray-700">{point}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {/* Linear Arrow Navigation - full width */}
-      <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between w-full overflow-x-auto mb-6"
-        style={isFullScreen ? { position: 'fixed', top: 0, left: 0, width: '100vw', zIndex: 1100 } : { height: '8vh', minHeight: 56, maxHeight: '12vh' }}>
-        <div className="flex items-center w-full space-x-2 overflow-x-auto">
-          {slides.map((slide, idx) => (
-            <div key={slide.slide_number || idx} className="flex items-center">
-              <button
-                onClick={() => setCurrentSlideIndex(idx)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 min-w-0 truncate
-                    ${idx === currentSlideIndex ? 'bg-blue-600 text-white shadow' : 'bg-gray-100 text-gray-700 hover:bg-blue-100'}`}
-                aria-current={idx === currentSlideIndex ? 'true' : undefined}
-              >
-                <div className="text-center">
-                  <div className="text-xs text-gray-500 mb-1">Slide {slide.slide_number || idx + 1}</div>
-                  <div className="max-w-32 truncate text-sm">{slide.title}</div>
-                </div>
-              </button>
-              {idx < slides.length - 1 && (
-                <svg className="w-4 h-4 text-gray-400 mx-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              )}
-            </div>
-          ))}
-        </div>
-        {isFullScreen && (
-          <button
-            onClick={() => setIsFullScreen(false)}
-            className="ml-4 px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 shadow"
-            style={{ position: 'absolute', right: 24, top: 12, zIndex: 1200 }}
-          >
-            Minimize
-          </button>
-        )}
-      </div>
-      {/* Canvas Grid - dynamic based on slide.layout */}
-      {/*   */}
-      <div
-        ref={canvasRef}
-        style={{
-          width: isFullScreen ? "100vw" : "100%",
-          // Subtract arrow navigation height (e.g. 56px) in fullscreen
-          height: isFullScreen ? "calc(100vh - 10px)" : "82vh",
-          minHeight: 0,
-          overflow: "hidden",
-          display: "grid",
-          gridTemplateColumns: currentSlide && currentSlide.layout ? `repeat(${currentSlide.layout.columns}, 1fr)` : "1fr 1fr",
-          gridTemplateRows: currentSlide && currentSlide.layout ? `repeat(${currentSlide.layout.rows}, 1fr)` : "1fr 1fr",
-          gap: 0, // show space between grid cells
-          background: '#ffffff', // opaque only in fullscreen
-          position: isFullScreen ? "fixed" : "relative",
-          top: isFullScreen ? 56 : undefined,
-          left: isFullScreen ? 0 : undefined,
-          zIndex: isFullScreen ? 1000 : undefined
-        }}
-      >
-
-  {console.log("Rendering canvas items:", canvasItems)}
-  {canvasItems.map((item, idx) => {
-          // If using new layout, use gridRow/gridCol, else fallback to gridArea
-          const gridStyle = currentSlide && currentSlide.layout
-            ? {
-              gridRow: `${item.gridRow} / span ${item.rowSpan || 1}`,
-              gridColumn: `${item.gridCol} / span ${item.colSpan || 1}`,
-              position: "relative",
-              width: "100%",
-              height: "100%"
-            }
-            : { gridArea: item.gridArea, position: "relative", width: "100%", height: "100%" };
-          return (
-            <div key={item.id} style={{ ...gridStyle, minHeight: 0, height: '100%', overflow: 'auto', maxHeight: '100%' }}>
-              <Draggable
-                bounds="parent"
-                position={{ x: item.x || 0, y: item.y || 0 }}
-                onDrag={(e, data) => handleDrag(e, data, item.id)}
-              >
-                <div
-                  className="border rounded shadow p-4 h-full w-full flex flex-col relative group"
-                  onDoubleClick={() => { if (ENABLE_INLINE_EDITING) startEditItem(item.id); }}
-                    style={{
-                    boxSizing: "border-box",
-                    overflow: "hidden",
-                    minWidth: 120,
-                    minHeight: 80,
-                    maxWidth: "100%",
-                    maxHeight: "100%",
-                    background: CARD_PALETTE[idx % CARD_PALETTE.length].bg,
-                    borderLeft: `6px solid ${CARD_PALETTE[idx % CARD_PALETTE.length].accent}`,
-                    transition: 'transform 0.12s ease, box-shadow 0.12s ease',
-                  }}
-                >
-                    <div className="absolute top-2 right-2 flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto">
-                    {/* Show a small badge when editing is disabled, but always allow deletion */}
-                    {!ENABLE_INLINE_EDITING && (
-                      <div className="text-xs text-gray-500 bg-white px-2 py-1 rounded shadow">Editing disabled</div>
-                    )}
-                    {/* Edit / Save / Cancel buttons only when inline editing is enabled */}
-                    {ENABLE_INLINE_EDITING && !editingMap[item.id] && (
-                      <button
-                        className="text-sm text-gray-600 bg-white px-2 py-1 rounded shadow"
-                        onClick={() => startEditItem(item.id)}
-                      >Edit</button>
-                    )}
-                    {ENABLE_INLINE_EDITING && editingMap[item.id] && (
-                      <>
+                    {/* Background Color Picker */}
+                    <div className="relative">
                         <button
-                          className="text-sm text-green-600 bg-white px-2 py-1 rounded shadow"
-                          onClick={() => saveEditItem(item.id)}
-                        >Save</button>
-                        <button
-                          className="text-sm text-gray-600 bg-white px-2 py-1 rounded shadow"
-                          onClick={() => cancelEditItem(item.id)}
-                        >Cancel</button>
-                      </>
-                    )}
-                    {/* Delete is always available */}
-                    <button
-                      className="text-red-500 text-sm bg-white px-2 py-1 rounded shadow"
-                      onClick={() => handleDelete(item.id)}
-                      aria-label="Delete section"
-                    >✕</button>
-                  </div>
-                  {/* Resize handle */}
-                  <div
-                    className="absolute bottom-1 right-1 w-4 h-4 bg-blue-400 rounded cursor-nwse-resize flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto"
-                    style={{ zIndex: 10 }}
-                    onMouseDown={e => handleResizeStart(e, item.id)}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 12 12"><polyline points="2,10 10,10 10,2" fill="none" stroke="white" strokeWidth="2" /></svg>
-                  </div>
-                  {/* Listen for mousemove/mouseup events for resizing */}
-                  {item.resizing && (
-                    <ResizeListener id={item.id} onResize={handleResize} onResizeEnd={handleResizeEnd} />
-                  )}
-                  {/* Render section content based on type, fallback to raw content */}
-                  {editingMap[item.id] && item.type === 'frameworks' ? (
-                      <div className="flex-1 w-full overflow-auto">
-                        {(() => {
-                          const fwData = item.frameworkData || item.data || {};
-                          let parsed;
-                          try { parsed = editingValues[item.id] ? JSON.parse(editingValues[item.id]) : fwData; } catch (e) { parsed = fwData; }
-                          const keys = Object.keys(parsed || {});
-                          return (
-                            <div>
-                              <table className="min-w-[200px] w-full border rounded text-xs" style={{ borderColor: '#e5e7eb' }}>
-                                <thead>
-                                  <tr>
-                                    {keys.map((key) => (
-                                      <th key={key} className="border px-2 py-1 font-semibold bg-gray-50">{key}</th>
-                                    ))}
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  <tr>
-                                    {keys.map((k) => (
-                                      <td key={k} className="border px-2 py-1 align-top">
-                                        <textarea
-                                          value={Array.isArray(parsed[k]) ? parsed[k].join('\n') : String(parsed[k] || '')}
-                                          onChange={(e) => {
-                                            const v = e.target.value.split('\n').map(s => s.trim()).filter(Boolean);
-                                            const next = { ...parsed, [k]: v };
-                                            setEditingValues(prev => ({ ...prev, [item.id]: JSON.stringify(next, null, 2) }));
-                                          }}
-                                          className="w-full h-24 p-1 border border-gray-200 rounded text-sm"
-                                        />
-                                      </td>
-                                    ))}
-                                  </tr>
-                                </tbody>
-                              </table>
-                              <div className="mt-2 flex space-x-2">
-                                <button onClick={() => saveEditItem(item.id)} className="px-3 py-1 bg-green-600 text-white rounded">Save</button>
-                                <button onClick={() => cancelEditItem(item.id)} className="px-3 py-1 bg-gray-100 rounded">Cancel</button>
-                              </div>
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    ) : (
-                    <>
-                      {item.type === "chart" && (
-                        (() => {
-                          // Use section.charts and section.chart_data for each section
-                          const chartTypes = Array.isArray(item.charts) ? item.charts : (item.chartType ? [item.chartType] : []);
-                          return chartTypes.length > 0 ? (
-                            <>
-                              <h4 className="font-bold mb-2">Chart</h4>
-                              <div className="flex-1 flex items-center justify-center">
-                                {chartTypes.map((chartType, idx) => {
-                                  // Always pass the full chart object for each chart type
-                                  const chartDataObj = item.chart_data && item.chart_data[chartType];
-                                  const chartData = chartDataObj || item.chartData || {};
-                                  return (
-                                    <ChartRenderer
-                                      key={chartType + idx}
-                                      type={chartType}
-                                      data={chartData}
-                                      xAxisTitle={chartData.xAxisTitle}
-                                      yAxisTitle={chartData.yAxisTitle}
-                                      legend={chartData.legend}
-                                      inferences={chartData.inferences}
-                                      palette={ (remotePalette && remotePalette.length>0) ? remotePalette : CARD_PALETTE.map(p => p.accent) }
-                                    />
-                                  );
-                                })}
-                              </div>
-                            </>
-                          ) : null;
-                        })()
-                      )}
-                      {item.type === "frameworks" && (
+                            onClick={() => setShowColorPicker(!showColorPicker)}
+                            className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+                        >
+                            <div style={{ width: 20, height: 20, background: canvasBackgroundColor, borderRadius: 4, border: '1px solid #ccc' }} />
+                            <span className="text-xs font-medium text-gray-700">Background</span>
+                        </button>
 
-                        <>
-                          <h4 className="font-bold mb-2">Frameworks</h4>
-                          <div className="flex-1 overflow-auto">
-                            {item.data && item.data.length > 0 ? (
-                              // filter out falsy/null framework entries
-                              item.data.filter(Boolean).map((fw, idx) => (
-                                <div key={idx} className="mb-2">
-                                  <div className="font-semibold text-xs mb-1">{fw || 'Framework'}</div>
-                                  {
-                                    (() => {
-                                      const sectionAccent = (remotePalette && remotePalette.length > 0)
-                                        ? remotePalette[idx % remotePalette.length]
-                                        : CARD_PALETTE[idx % CARD_PALETTE.length].accent;
-                                      const fallbackPalette = (remotePalette && remotePalette.length>0) ? remotePalette : CARD_PALETTE.map(p => p.accent);
-                                      const paletteForFramework = [sectionAccent, ...fallbackPalette.filter(p => p !== sectionAccent)];
-                                      return (
-                                        <FrameworkDiagram
-                                          framework={fw}
-                                          frameworkData={item.frameworkData && item.frameworkData[fw] ? item.frameworkData[fw] : undefined}
-                                          palette={paletteForFramework}
+                        {showColorPicker && (
+                            <div className="absolute right-0 mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-3">
+                                <div className="text-xs font-semibold text-gray-700 mb-2">Canvas Background</div>
+                                <input
+                                    type="color"
+                                    value={canvasBackgroundColor}
+                                    onChange={(e) => setCanvasBackgroundColor(e.target.value)}
+                                    className="w-full h-10 cursor-pointer"
+                                />
+                                <div className="mt-2 grid grid-cols-4 gap-2">
+                                    {['#ffffff', '#f5f5f4', '#e5e7eb', '#d1fae5', '#dbeafe', '#fef3c7', '#fce7f3', '#e0e7ff'].map(color => (
+                                        <button
+                                            key={color}
+                                            onClick={() => setCanvasBackgroundColor(color)}
+                                            style={{ width: 32, height: 32, background: color, borderRadius: 6, border: '2px solid #ddd' }}
+                                            className="hover:scale-110 transition-transform"
                                         />
-                                      );
-                                    })()
-                                  }
+                                    ))}
                                 </div>
-                              ))
-                            ) : (
-                              <span className="text-xs text-gray-500">No frameworks</span>
-                            )}
-                          </div>
-                        </>
-                      )}
-                      {item.type === "keyPoints" && (
-                        <>
-                          <h4 className="font-bold mb-2">Key Points</h4>
-                          <div className="flex-1 overflow-auto">
-                            {editingMap[item.id] ? (
-                              (() => {
-                                const raw = editingValues[item.id] || (Array.isArray(item.data) ? item.data.join('\n') : String(item.data || ''));
-                                const lines = raw.split('\n'); // preserve empty lines
-                                return (
-                                  <div className="flex flex-col gap-3">
-                                    {lines.map((line, li) => (
-                                      <div key={li} className="rounded-lg p-3" style={{ background: CARD_PALETTE[li % CARD_PALETTE.length].bg, borderLeft: `6px solid ${CARD_PALETTE[li % CARD_PALETTE.length].accent}` }}>
-                                        <textarea key={li} value={line} onChange={(e)=>{
-                                          const copy = lines.slice(); copy[li] = e.target.value; setEditingValues(prev=>({ ...prev, [item.id]: copy.join('\n') }));
-                                        }} className="w-full p-2 border border-gray-200 rounded text-sm bg-white" />
-                                      </div>
-                                    ))}
-                                    <div className="mt-1">
-                                      <button type="button" onClick={()=>{ const copy = lines.slice(); copy.push(''); setEditingValues(prev=>({ ...prev, [item.id]: copy.join('\n') })); }} className="text-sm text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity duration-150">Add point</button>
-                                    </div>
-                                  </div>
-                                );
-                              })()
-                            ) : (
-                              <ul className="list-disc ml-4 flex-1 overflow-auto">
-                                {Array.isArray(item.data) ? item.data.map((point, i) => (
-                                  <li key={i} className="text-xs text-gray-700">{point}</li>
-                                )) : <li className="text-xs text-gray-700">{item.data}</li>}
-                              </ul>
-                            )}
-                          </div>
-                        </>
-                      )}
-                      {item.type === "takeaway" && (
-                        <div className="grid grid-cols-2 gap-4 h-full w-full">
-                            <div className="p-3 overflow-auto" style={{ background: CARD_PALETTE[0].bg, borderLeft: `6px solid ${CARD_PALETTE[0].accent}` }}>
-                              <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[0].accent), 0.12) }}>Key Insight</h4>
-                              {editingMap[item.id] ? (
-                                <textarea value={(editingValues[item.id] ? (()=>{ try{ const parsed=JSON.parse(editingValues[item.id]); return parsed.takeaway || ''; }catch(e){ return item.data.takeaway || '' } })() : (item.data.takeaway || ''))} onChange={(e)=>{ const raw = editingValues[item.id] || JSON.stringify(item.data); try{ const parsed = JSON.parse(raw); parsed.takeaway = e.target.value; setEditingValues(prev=>({ ...prev, [item.id]: JSON.stringify(parsed, null, 2) })); }catch(err){ const next = { ...(item.data||{}), takeaway: e.target.value }; setEditingValues(prev=>({ ...prev, [item.id]: JSON.stringify(next, null, 2) })); } }} className="w-full p-2 border border-transparent rounded bg-white text-sm" />
-                              ) : (
-                                <p className="text-sm" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[0].accent), 0.12) }}>{item.data.takeaway}</p>
-                              )}
                             </div>
-                            <div className="p-3 overflow-auto" style={{ background: CARD_PALETTE[1].bg, borderLeft: `6px solid ${CARD_PALETTE[1].accent}` }}>
-                              <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[1].accent), 0.12) }}>Next Steps</h4>
-                              {editingMap[item.id] ? (
-                                <textarea value={(editingValues[item.id] ? (()=>{ try{ const parsed=JSON.parse(editingValues[item.id]); return parsed.call_to_action || ''; }catch(e){ return item.data.call_to_action || '' } })() : (item.data.call_to_action || ''))} onChange={(e)=>{ const raw = editingValues[item.id] || JSON.stringify(item.data); try{ const parsed = JSON.parse(raw); parsed.call_to_action = e.target.value; setEditingValues(prev=>({ ...prev, [item.id]: JSON.stringify(parsed, null, 2) })); }catch(err){ const next = { ...(item.data||{}), call_to_action: e.target.value }; setEditingValues(prev=>({ ...prev, [item.id]: JSON.stringify(next, null, 2) })); } }} className="w-full p-2 border border-transparent rounded bg-white text-sm" />
-                              ) : (
-                                <p className="text-sm" style={{ color: readableTextOnAlphaBg(ensureHex(CARD_PALETTE[1].accent), 0.12) }}>{item.data.call_to_action}</p>
-                              )}
+                        )}
+                    </div>
+
+                    {/* Palette Selector */}
+                    <div className="relative">
+                        <button
+                            onClick={() => setShowPaletteSelector(!showPaletteSelector)}
+                            className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+                        >
+                            <div className="flex gap-1">
+                                {CARD_PALETTE.slice(0, 4).map((c, i) => (
+                                    <div key={i} style={{ width: 14, height: 14, background: c.accent, borderRadius: 3 }} />
+                                ))}
+                            </div>
+                            <span className="text-xs font-medium text-gray-700">Palette</span>
+                        </button>
+
+                        {showPaletteSelector && (
+                            <div className="absolute right-0 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-3">
+                                <div className="text-xs font-semibold text-gray-700 mb-2 uppercase">Color Theme</div>
+                                {Object.entries(COLOR_PALETTES).map(([key, palette]) => (
+                                    <button
+                                        key={key}
+                                        onClick={() => {
+                                            setSelectedPalette(key);
+                                            setShowPaletteSelector(false);
+                                        }}
+                                        className={`w-full flex items-center justify-between p-2 rounded hover:bg-gray-50 transition ${selectedPalette === key ? 'bg-blue-50 border border-blue-200' : ''
+                                            }`}
+                                    >
+                                        <span className="text-sm font-medium capitalize">{key}</span>
+                                        <div className="flex gap-1">
+                                            {palette.map((c, i) => (
+                                                <div key={i} style={{ width: 12, height: 12, background: c.accent, borderRadius: 3 }} />
+                                            ))}
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* Canvas Container */}
+            <div
+                ref={canvasRef}
+                onClick={handleCanvasClick}
+                style={{
+                    width: isFullScreen ? "100vw" : "100%",
+                    maxWidth: isFullScreen ? "none" : `${CANVAS_WIDTH}px`,
+                    height: isFullScreen ? "100vh" : `${CANVAS_HEIGHT}px`,
+                    background: canvasBackgroundColor,
+                    position: isFullScreen ? "fixed" : "relative",
+                    top: isFullScreen ? 0 : undefined,
+                    left: isFullScreen ? 0 : undefined,
+                    overflow: "hidden",
+                    border: "1px solid #d6d3d1",
+                    borderRadius: isFullScreen ? 0 : "8px 8px 0 0",
+                    zIndex: isFullScreen ? 9999 : undefined,
+                    margin: "0 auto",
+                    boxSizing: "border-box",
+                }}
+            >
+                {/* Canvas Items */}
+                {canvasItems.map((item, idx) => (
+                    <Draggable
+                        key={item.id}
+                        bounds="parent"
+                        position={{ x: item.x || 0, y: item.y || 0 }}
+                        onDrag={(e, data) => handleDrag(e, data, item.id)}
+                        onStart={() => bringToFront(item.id)}
+                    >
+                        <div
+                            style={{
+                                position: "absolute",
+                                width: item.width,
+                                height: item.height,
+                                background: "#ffffff",
+                                border: `${borderWidth}px dashed ${CARD_PALETTE[idx % CARD_PALETTE.length].accent}`,
+                                borderRadius: 12,
+                                boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+                                overflow: "hidden",
+                                display: "flex",
+                                flexDirection: "column",
+                                cursor: "move",
+                                zIndex: item.zIndex || 0,
+                                boxSizing: "border-box",
+                            }}
+                            className="group"
+                        >
+                            {/* Toolbar */}
+                            <div className="absolute top-2 right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto" style={{ zIndex: 20 }}>
+                                {item.type === "custom" && Array.isArray(item.data) && (
+                                    <button className="text-xs text-green-700 bg-white px-2 py-1 rounded shadow hover:bg-green-50" onClick={() => addListItem(item.id)} title="Add point">+</button>
+                                )}
+                                <button className="text-xs text-blue-700 bg-white px-2 py-1 rounded shadow hover:bg-blue-50" onClick={() => bringToFront(item.id)} title="Bring to front">↑</button>
+                                <button className="text-xs text-blue-700 bg-white px-2 py-1 rounded shadow hover:bg-blue-50" onClick={() => sendToBack(item.id)} title="Send to back">↓</button>
+                                <button className="text-xs text-red-600 bg-white px-2 py-1 rounded shadow hover:bg-red-50" onClick={() => handleDelete(item.id)}>🗑</button>
+                            </div>
+
+                            {/* Resize Handle */}
+                            <div
+                                className="absolute bottom-2 right-2 w-5 h-5 bg-blue-500 rounded cursor-nwse-resize flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto"
+                                style={{ zIndex: 20 }}
+                                onMouseDown={e => handleResizeStart(e, item.id)}
+                            >
+                                <span className="text-white text-xs">⇲</span>
+                            </div>
+
+                            {item.resizing && (
+                                <ResizeListener id={item.id} onResize={handleResize} onResizeEnd={handleResizeEnd} />
+                            )}
+
+                            {/* Content Area */}
+                            <div className="flex-1 overflow-auto p-4" style={{ fontSize: '0.875rem' }}>
+                                {/* Editable Title - PowerPoint style */}
+                                <h4
+                                    contentEditable={true}
+                                    suppressContentEditableWarning={true}
+                                    onBlur={(e) => handleContentEdit(item.id, 'title', e.target.textContent)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            e.target.blur();
+                                        }
+                                    }}
+                                    className="font-bold mb-2 uppercase tracking-wide outline-none focus:ring-2 focus:ring-blue-300 rounded px-1"
+                                    style={{
+                                        fontSize: '0.95rem',
+                                        lineHeight: '1.3',
+                                        color: CARD_PALETTE[idx % CARD_PALETTE.length].accent
+                                    }}
+                                >{item.title || 'Section'}</h4>
+
+                                {(
+                                    <>
+                                        {/* Chart Type */}
+                                        {item.type === "chart" && item.chartType && (
+                                            <div className="flex-1 flex items-center justify-center" style={{ minHeight: 0, maxHeight: '100%' }}>
+                                                <div style={{ width: '100%', height: '100%', maxHeight: item.height - 100 }}>
+                                                    {(() => {
+                                                        // Extract chart data from the chartData object
+                                                        // Backend structure: section.chart_data = { "Bar Chart": { labels, values, xAxisTitle, ... } }
+                                                        let chartDataForType = item.chartData;
+                                                        if (item.chartData && typeof item.chartData === 'object' && item.chartType) {
+                                                            chartDataForType = item.chartData[item.chartType] || item.chartData;
+                                                        }
+                                                        return (
+                                                            <ChartRenderer
+                                                                type={item.chartType}
+                                                                data={chartDataForType || {}}
+                                                                xAxisTitle={chartDataForType?.xAxisTitle}
+                                                                yAxisTitle={chartDataForType?.yAxisTitle}
+                                                                legend={chartDataForType?.legend}
+                                                                inferences={chartDataForType?.inferences}
+                                                                palette={remotePalette || CARD_PALETTE.map(p => p.accent)}
+                                                            />
+                                                        );
+                                                    })()}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Framework Type */}
+                                        {item.type === "framework" && item.frameworks && item.frameworks.length > 0 && (
+                                            <div className="flex-1 overflow-auto" style={{ minHeight: 0 }}>
+                                                {item.frameworks.filter(Boolean).map((fw, fwidx) => {
+                                                    // Extract framework data from frameworkData array
+                                                    let fwData = null;
+                                                    if (Array.isArray(item.frameworkData)) {
+                                                        const found = item.frameworkData.find(fd => fd && fd[fw]);
+                                                        fwData = found ? found[fw] : null;
+                                                    } else if (item.frameworkData && typeof item.frameworkData === 'object') {
+                                                        fwData = item.frameworkData[fw];
+                                                    }
+
+                                                    return (
+                                                        <div key={fwidx} className="mb-2" style={{ maxHeight: item.height - 100 }}>
+                                                            <div className="font-semibold mb-1 text-gray-700" style={{ fontSize: '0.7rem' }}>{fw}</div>
+                                                            <div style={{ fontSize: '0.7rem' }}>
+                                                                <FrameworkDiagram
+                                                                    framework={fw}
+                                                                    frameworkData={fwData}
+                                                                    palette={remotePalette || CARD_PALETTE.map(p => p.accent)}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+
+                                        {/* Key Points Type */}
+                                        {item.type === "keyPoints" && (
+                                            <ul className="list-none ml-0 flex-1 overflow-auto">
+                                                {Array.isArray(item.data) && item.data.map((point, i) => (
+                                                    <li key={i} className="text-gray-800 mb-2 pl-3 group/item relative" style={{
+                                                        fontSize: '0.8rem',
+                                                        lineHeight: '1.4',
+                                                        borderLeft: `4px solid ${CARD_PALETTE[i % CARD_PALETTE.length].accent}`,
+                                                        paddingLeft: '0.75rem'
+                                                    }}>
+                                                        <span
+                                                            contentEditable={true}
+                                                            suppressContentEditableWarning={true}
+                                                            onBlur={(e) => handleListItemEdit(item.id, i, e.target.textContent)}
+                                                            className="outline-none focus:ring-2 focus:ring-blue-300 rounded px-1"
+                                                        >{point}</span>
+                                                        <button
+                                                            className="absolute right-0 top-0 text-xs text-red-500 opacity-0 group-hover/item:opacity-100 transition-opacity"
+                                                            onClick={() => deleteListItem(item.id, i)}
+                                                        >×</button>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+
+                                        {/* Takeaway Type */}
+                                        {item.type === "takeaway" && (
+                                            <div className="flex flex-col gap-2 h-full overflow-auto">
+                                                <div className="p-2 overflow-auto" style={{ borderLeft: `4px solid ${CARD_PALETTE[0].accent}` }}>
+                                                    <h5 className="font-semibold uppercase tracking-wide mb-1" style={{ color: CARD_PALETTE[0].accent, fontSize: '0.65rem' }}>Key Insight</h5>
+                                                    <p
+                                                        contentEditable={true}
+                                                        suppressContentEditableWarning={true}
+                                                        onBlur={(e) => handleContentEdit(item.id, 'takeaway', e.target.textContent)}
+                                                        className="text-gray-800 outline-none focus:ring-2 focus:ring-blue-300 rounded px-1"
+                                                        style={{ fontSize: '0.75rem', lineHeight: '1.4' }}
+                                                    >{item.data?.takeaway || ''}</p>
+                                                </div>
+                                                <div className="p-2 overflow-auto" style={{ borderLeft: `4px solid ${CARD_PALETTE[1].accent}` }}>
+                                                    <h5 className="font-semibold uppercase tracking-wide mb-1" style={{ color: CARD_PALETTE[1].accent, fontSize: '0.65rem' }}>Next Steps</h5>
+                                                    <p
+                                                        contentEditable={true}
+                                                        suppressContentEditableWarning={true}
+                                                        onBlur={(e) => handleContentEdit(item.id, 'call_to_action', e.target.textContent)}
+                                                        className="text-gray-800 outline-none focus:ring-2 focus:ring-blue-300 rounded px-1"
+                                                        style={{ fontSize: '0.75rem', lineHeight: '1.4' }}
+                                                    >{item.data?.call_to_action || ''}</p>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Custom/Generic Content */}
+                                        {item.type === "custom" && (
+                                            <div className="flex-1 overflow-auto" style={{ minHeight: 0 }}>
+                                                {/* Render Charts */}
+                                                {item.charts && item.charts.length > 0 && (
+                                                    <div className="mb-2" style={{ maxHeight: item.height - 120 }}>
+                                                        {item.charts.map((chartType, cidx) => {
+                                                            // Backend structure: section.chart_data = { "Bar Chart": { labels, values, ... } }
+                                                            let chartDataObj = {};
+                                                            if (item.chartData && typeof item.chartData === 'object') {
+                                                                chartDataObj = item.chartData[chartType] || item.chartData;
+                                                            }
+                                                            return (
+                                                                <div key={cidx} className="mb-2" style={{ fontSize: '0.7rem' }}>
+                                                                    <ChartRenderer
+                                                                        type={chartType}
+                                                                        data={chartDataObj}
+                                                                        xAxisTitle={chartDataObj?.xAxisTitle}
+                                                                        yAxisTitle={chartDataObj?.yAxisTitle}
+                                                                        legend={chartDataObj?.legend}
+                                                                        inferences={chartDataObj?.inferences}
+                                                                        palette={remotePalette || CARD_PALETTE.map(p => p.accent)}
+                                                                    />
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+
+                                                {/* Render Frameworks */}
+                                                {item.frameworks && item.frameworks.length > 0 && (
+                                                    <div className="mb-2" style={{ maxHeight: item.height - 120 }}>
+                                                        {item.frameworks.filter(Boolean).map((fw, fwidx) => {
+                                                            let fwData = null;
+                                                            if (Array.isArray(item.frameworkData)) {
+                                                                const found = item.frameworkData.find(fd => fd && fd[fw]);
+                                                                fwData = found ? found[fw] : null;
+                                                            } else if (item.frameworkData && typeof item.frameworkData === 'object') {
+                                                                fwData = item.frameworkData[fw];
+                                                            }
+
+                                                            return (
+                                                                <div key={fwidx} className="mb-2">
+                                                                    <div className="font-semibold mb-1 text-gray-700" style={{ fontSize: '0.7rem' }}>{fw}</div>
+                                                                    <div style={{ fontSize: '0.7rem' }}>
+                                                                        <FrameworkDiagram
+                                                                            framework={fw}
+                                                                            frameworkData={fwData}
+                                                                            palette={remotePalette || CARD_PALETTE.map(p => p.accent)}
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+
+                                                {/* Render Text Content */}
+                                                {item.data && (
+                                                    <div className="text-gray-800" style={{ fontSize: '0.8rem', lineHeight: '1.4' }}>
+                                                        {Array.isArray(item.data) ? (
+                                                            <ul className="list-none ml-0">
+                                                                {item.data.map((point, i) => (
+                                                                    <li key={i} className="mb-2 pl-3 group/item relative" style={{
+                                                                        borderLeft: `4px solid ${CARD_PALETTE[i % CARD_PALETTE.length].accent}`,
+                                                                        paddingLeft: '0.75rem'
+                                                                    }}>
+                                                                        <span
+                                                                            contentEditable={true}
+                                                                            suppressContentEditableWarning={true}
+                                                                            onBlur={(e) => handleListItemEdit(item.id, i, e.target.textContent)}
+                                                                            className="outline-none focus:ring-2 focus:ring-blue-300 rounded px-1"
+                                                                        >{point}</span>
+                                                                        <button
+                                                                            className="absolute right-0 top-0 text-xs text-red-500 opacity-0 group-hover/item:opacity-100 transition-opacity"
+                                                                            onClick={() => deleteListItem(item.id, i)}
+                                                                        >×</button>
+                                                                    </li>
+                                                                ))}
+                                                            </ul>
+                                                        ) : (
+                                                            <p
+                                                                contentEditable={true}
+                                                                suppressContentEditableWarning={true}
+                                                                onBlur={(e) => handleContentEdit(item.id, 'data', e.target.textContent)}
+                                                                className="whitespace-pre-line outline-none focus:ring-2 focus:ring-blue-300 rounded px-1"
+                                                                style={{ fontSize: '0.8rem', lineHeight: '1.4' }}
+                                                            >{String(item.data || '')}</p>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </>
+                                )}
                             </div>
                         </div>
-                      )}
-                    </>
-                  )}
-                  {!["chart", "frameworks", "keyPoints", "takeaway"].includes(item.type) && (
-                    <div className="rounded-xl border border-gray-200 p-4 shadow-sm flex-1 flex flex-col items-start overflow-auto" style={{ background: 'rgba(255,255,255,1)', justifyContent: 'flex-start', minHeight: 0 }}>
-                      {/* Section Title */}
-                      <div className="mb-4 w-full">
-                        <h3 className="text-base font-bold text-gray-800 uppercase tracking-wide mb-3">{item.title || item.type || "SECTION"}</h3>
-                        {(() => {
-                            if (editingMap[item.id]) {
-                            // Inline editing for generic data (render deck-like cards for arrays)
-                            if (Array.isArray(item.data)) {
-                              const raw = editingValues[item.id] || item.data.join('\n');
-                              const lines = raw.split('\n'); // preserve empties
-                              return (
-                                <div className="flex flex-col gap-3">
-                                  {lines.map((ln, i) => (
-                                    <div key={i} className="rounded-lg p-3" style={{ background: CARD_PALETTE[i % CARD_PALETTE.length].bg, borderLeft: `6px solid ${CARD_PALETTE[i % CARD_PALETTE.length].accent}` }}>
-                                      <textarea value={ln} onChange={(e)=>{ const copy = lines.slice(); copy[i]=e.target.value; setEditingValues(prev=>({ ...prev, [item.id]: copy.join('\n') })); }} className="w-full p-2 border border-gray-200 rounded text-sm bg-white" />
-                                    </div>
-                                  ))}
-                                  <div className="mt-1">
-                                    <button type="button" onClick={()=>{ const copy = lines.slice(); copy.push(''); setEditingValues(prev=>({ ...prev, [item.id]: copy.join('\n') })); }} className="text-sm text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity duration-150">Add line</button>
-                                  </div>
-                                </div>
-                              );
-                            } else if (typeof item.data === 'object' && item.data !== null) {
-                              const raw = editingValues[item.id] || JSON.stringify(item.data, null, 2);
-                              return <textarea value={raw} onChange={(e)=>setEditingValues(prev=>({ ...prev, [item.id]: e.target.value }))} className="w-full p-2 border border-gray-200 rounded text-sm font-mono" />;
-                            } else {
-                              const raw = editingValues[item.id] || String(item.data || '');
-                              return <input value={raw} onChange={(e)=>setEditingValues(prev=>({ ...prev, [item.id]: e.target.value }))} className="w-full p-2 border border-gray-200 rounded text-sm" />;
-                            }
-                          }
-                          // non-editing render
-                          if (Array.isArray(item.data)) {
-                            // Array: show as SmartArt flowchart
-                            return <SmartArtFlow items={item.data} palette={ (remotePalette && remotePalette.length>0) ? remotePalette : CARD_PALETTE.map(p=>p.accent) } />;
-                          } else if (typeof item.data === 'object' && item.data !== null) {
-                            // Object: pretty JSON, no bullet
-                            return (
-                              <pre className="text-xs text-gray-700 bg-gray-50 rounded p-2 overflow-auto whitespace-pre-wrap">
-                                {JSON.stringify(item.data, null, 2)}
-                              </pre>
-                            );
-                          } else if (typeof item.data === 'string') {
-                            // String: split into bullets if possible
-                            const points = parseListItems(item.data).map(s => s.trim()).filter(s => s && s !== '-');
-                            if (points.length > 1) {
-                              return <SmartArtFlow items={points} palette={ (remotePalette && remotePalette.length>0) ? remotePalette : CARD_PALETTE.map(p=>p.accent) } />;
-                            } else {
-                              return (
-                                <div>
-                                  <span className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">{item.data}</span>
-                                  <div className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto">
-                                    <button
-                                      className="text-sm text-blue-600"
-                                      onClick={() => enrichSection(item.id, 3)}
-                                      disabled={!!isEnriching[item.id]}
-                                    >
-                                      {isEnriching[item.id] ? 'Adding...' : 'Add more content'}
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            }
-                          } else {
-                            return null;
-                          }
-                        })()}
-                      </div>
-                      {/* Charts: only show if item.chartData exists and is non-empty */}
-                      {(() => {
-                        let chartsArr = [];
-                        if (Array.isArray(item.chartData)) {
-                          chartsArr = item.chartData;
-                        } else if (item.chartData && typeof item.chartData === 'object') {
-                          chartsArr = Object.keys(item.chartData);
-                        }
-                        if (!item.chartData || chartsArr.length === 0) return null;
-                        return (
-                          <div className="mt-4">
-                            <h4 className="font-bold text-xs text-blue-700 mb-2">Charts</h4>
-                            <div className="flex flex-col gap-2">
+                    </Draggable>
+                ))}
 
-                              <ChartRenderer type={item.chartType} data={item.chartData} palette={ (remotePalette && remotePalette.length>0) ? remotePalette : CARD_PALETTE.map(p => p.accent) } />
-                            </div>
-                          </div>
-                        );
-                      })()}
-                      {/* Infographics: show suggested infographics for this section */}
-                      {(() => {
-                        if (!item.infographics || item.infographics.length === 0) return null;
-                        return (
-                          <div className="mt-4">
-                            <h4 className="font-bold text-xs text-purple-700 mb-2">Suggested Infographics</h4>
-                            <div className="flex flex-wrap gap-2">
-                              {item.infographics.map((inf, idx) => (
-                                <div key={idx} className="bg-purple-50 border-l-4 border-purple-400 p-2 rounded text-xs text-purple-900 font-semibold">
-                                  {inf}
-                                  {/* Optionally render SmartArtFlow for each infographic type if data available */}
-                                  {/* <SmartArtFlow items={item.data} type={inf} /> */}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })()}
-                      {/* Frameworks: show each framework as heading, data as table */}
-                      {(() => {
-                        let frameworksArr = [];
-                        if (item.frameworkData && typeof item.frameworkData === 'object') {
-                          frameworksArr = Object.keys(item.frameworkData);
-                        }
-                        if (!item.frameworkData || frameworksArr.length === 0) return null;
-                        return (
-                          <div className="mt-4">
-                            <h4 className="font-bold text-xs text-green-700 mb-2">Frameworks</h4>
-                            <div className="flex flex-col gap-4">
-                              {frameworksArr.map((fw, fwIdx) => {
-                                if (!fw) return null;
-                                const fwData = (item.frameworkData && (item.frameworkData[fw] || item.frameworkData.find?.(f => f.framework === fw)?.data)) || {};
-                                if (!fwData || typeof fwData !== 'object' || Object.keys(fwData).length === 0) return null;
-
-                                // Use the section (card) palette color for this framework table
-                                const sectionAccent = (remotePalette && remotePalette.length > 0)
-                                  ? remotePalette[idx % remotePalette.length]
-                                  : CARD_PALETTE[idx % CARD_PALETTE.length].accent;
-                                const sectionAccentHex = ensureHex(sectionAccent);
-                                const tableBorder = sectionAccentHex;
-                                const thBg = (/^#([A-Fa-f0-9]{6})$/.test(sectionAccentHex)) ? `${sectionAccentHex}20` : '#f3f4f6';
-                                const thColor = readableTextColor(sectionAccentHex);
-                                const tdBorder = `${sectionAccentHex}10`;
-
-                                // Recursive table renderer
-                                function renderTable(data) {
-                                  if (!data || typeof data !== 'object') return String(data);
-                                  const keys = Object.keys(data);
-                                  const rowCount = Array.isArray(data[keys[0]]) ? data[keys[0]].length : 1;
-                                  return (
-                                    <table className="min-w-full text-xs rounded mb-2" style={{ border: `1px solid ${tableBorder}` }}>
-                                      <thead>
-                                        <tr>
-                                          {keys.map((k, i) => (
-                                            <th key={i} className="px-2 py-1 font-semibold" style={{ background: thBg, color: '#111827', borderBottom: `1px solid ${tableBorder}` }}>{k}</th>
-                                          ))}
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {[...Array(rowCount)].map((_, rIdx) => (
-                                          <tr key={rIdx}>
-                                            {keys.map((k, cIdx) => {
-                                              let cell = Array.isArray(data[k]) ? data[k][rIdx] : data[k];
-                                              if (cell === null || cell === undefined) cell = '';
-                                              if (typeof cell === 'object' && cell !== null) {
-                                                // If array of objects, render each as table
-                                                if (Array.isArray(cell)) {
-                                                  return <td key={cIdx} className="px-2 py-1" style={{ borderBottom: `1px solid ${tdBorder}`, color: '#111827' }}>{cell.map((obj, i) => typeof obj === 'object' ? renderTable(obj) : String(obj))}</td>;
-                                                }
-                                                // If object, render as table
-                                                return <td key={cIdx} className="px-2 py-1" style={{ borderBottom: `1px solid ${tdBorder}`, color: '#111827' }}>{renderTable(cell)}</td>;
-                                              }
-                                              return <td key={cIdx} className="px-2 py-1" style={{ borderBottom: `1px solid ${tdBorder}`, color: '#111827' }}>{String(cell)}</td>;
-                                            })}
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  );
-                                }
-                                return (
-                                  <div key={fwIdx} className="p-3 rounded" style={{ background: thBg, borderLeft: `6px solid ${sectionAccentHex}` }}>
-                                    <div className="overflow-auto">
-                                      {renderTable(fwData)}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </div>
-              </Draggable>
-              {/* Black horizontal toolbar below canvas */}
-
+                {/* Floating Add Button */}
+                <button
+                    className="absolute bottom-8 left-8 w-14 h-14 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl font-bold transition-transform hover:scale-110"
+                    onClick={() => addNewItem('custom')}
+                    title="Add new section"
+                    style={{ zIndex: 1000 }}
+                >
+                    +
+                </button>
             </div>
-          ); // close map return
-        })}
 
-      </div>
-      <div className="w-full bg-black flex items-center justify-end py-2 px-4" style={{ borderRadius: '0 0 12px 12px' }}>
-          <div className="flex items-center mr-auto space-x-2">
-            <button
-              className="text-white bg-gray-800 hover:bg-gray-700 px-3 py-2 rounded flex items-center gap-2 shadow"
-              onClick={() => setCurrentSlideIndex && setCurrentSlideIndex(Math.max(0, currentSlideIndex - 1))}
-              disabled={currentSlideIndex === 0}
-              aria-label="Previous slide"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-              <span className="text-sm">Previous</span>
-            </button>
+            {/* Bottom Toolbar */}
+            <div className="w-full bg-black flex items-center justify-between py-3 px-4" style={{ borderRadius: '0 0 12px 12px' }}>
+                <div className="flex items-center space-x-2">
+                    <button
+                        className="text-white bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded flex items-center gap-2 shadow transition"
+                        onClick={() => setCurrentSlideIndex && setCurrentSlideIndex(Math.max(0, currentSlideIndex - 1))}
+                        disabled={currentSlideIndex === 0}
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                        <span className="text-sm">Previous</span>
+                    </button>
 
-            <button
-              className="text-white bg-gray-800 hover:bg-gray-700 px-3 py-2 rounded flex items-center gap-2 shadow"
-              onClick={() => setCurrentSlideIndex && setCurrentSlideIndex(Math.min(slides.length - 1, currentSlideIndex + 1))}
-              disabled={currentSlideIndex === slides.length - 1}
-              aria-label="Next slide"
-            >
-              <span className="text-sm">Next</span>
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-            </button>
-          </div>
-        <button
-          className="text-white bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded mr-2 flex items-center gap-2 shadow"
-          onClick={async () => {
-            // Download only the canvas container as PNG using html2canvas
-            try {
-              if (!window.html2canvas) {
-                await new Promise((resolve, reject) => {
-                  const s = document.createElement('script');
-                  s.src = 'https://html2canvas.hertzen.com/dist/html2canvas.min.js';
-                  s.onload = resolve;
-                  s.onerror = reject;
-                  document.body.appendChild(s);
-                });
-              }
-              const node = canvasRef.current;
-              if (!node) throw new Error('Canvas element not found');
-              const canvas = await window.html2canvas(node, { useCORS: true, backgroundColor: null, scale: 2 });
-              canvas.toBlob((blob) => {
-                if (!blob) return;
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                const filename = `${(currentSlide && currentSlide.title) ? currentSlide.title.replace(/[^a-z0-9-_]/gi, '_') : 'slide'}_slide_${currentSlideIndex + 1}.png`;
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                URL.revokeObjectURL(url);
-              }, 'image/png');
-            } catch (err) {
-              console.error('Failed to export canvas:', err);
-              alert('Failed to export slide image. Try again.');
-            }
-          }}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16v-8m0 8l-4-4m4 4l4-4m-8 8h8a2 2 0 002-2v-4a2 2 0 00-2-2H6a2 2 0 00-2 2v4a2 2 0 002 2z" /></svg>
-          Download
-        </button>
-        <button
-          className="text-white bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded flex items-center gap-2 shadow"
-          onClick={() => setIsFullScreen(fs => !fs)}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4h7V2H2v9h2V4zm16 0h-7V2h9v9h-2V4zm0 16h-7v2h9v-9h-2v7zm-16 0h7v2H2v-9h2v7z" /></svg>
-          {isFullScreen ? "Minimize" : "Full Screen"}
-        </button>
-      </div>
-      <EnrichConfirmModal
-        open={enrichModal.open}
-        initialContent={enrichModal.initialContent}
-        onClose={() => setEnrichModal({ open: false, itemId: null, initialContent: '' })}
-        onDone={(content) => applyEnrichedContent(enrichModal.itemId, content)}
-      />
-    </>
-  );
+                    <button
+                        className="text-white bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded flex items-center gap-2 shadow transition"
+                        onClick={() => setCurrentSlideIndex && setCurrentSlideIndex(Math.min(slides.length - 1, currentSlideIndex + 1))}
+                        disabled={currentSlideIndex === slides.length - 1}
+                    >
+                        <span className="text-sm">Next</span>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                    </button>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                    <button
+                        className="text-white bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded flex items-center gap-2 shadow transition"
+                        onClick={async () => {
+                            try {
+                                if (!window.html2canvas) {
+                                    await new Promise((resolve, reject) => {
+                                        const s = document.createElement('script');
+                                        s.src = 'https://html2canvas.hertzen.com/dist/html2canvas.min.js';
+                                        s.onload = resolve;
+                                        s.onerror = reject;
+                                        document.body.appendChild(s);
+                                    });
+                                }
+                                const node = canvasRef.current;
+                                if (!node) throw new Error('Canvas element not found');
+                                const canvas = await window.html2canvas(node, { useCORS: true, backgroundColor: '#ffffff', scale: 2 });
+                                canvas.toBlob((blob) => {
+                                    if (!blob) return;
+                                    const url = URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    const filename = `${(currentSlide?.title || 'slide').replace(/[^a-z0-9-_]/gi, '_')}_${currentSlideIndex + 1}.png`;
+                                    a.href = url;
+                                    a.download = filename;
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    a.remove();
+                                    URL.revokeObjectURL(url);
+                                }, 'image/png');
+                            } catch (err) {
+                                console.error('Failed to export canvas:', err);
+                                alert('Failed to export slide. Try again.');
+                            }
+                        }}
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        <span className="text-sm">Download PNG</span>
+                    </button>
+
+                    <button
+                        className="text-white bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded flex items-center gap-2 shadow transition"
+                        onClick={() => setIsFullScreen(fs => !fs)}
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            {isFullScreen ? (
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+                            ) : (
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                            )}
+                        </svg>
+                        <span className="text-sm">{isFullScreen ? "Exit Fullscreen" : "Fullscreen"}</span>
+                    </button>
+                </div>
+            </div>
+
+            <EnrichConfirmModal
+                open={enrichModal.open}
+                initialContent={enrichModal.initialContent}
+                onClose={() => setEnrichModal({ open: false, itemId: null, initialContent: '' })}
+                onDone={(content) => applyEnrichedContent(enrichModal.itemId, content)}
+            />
+        </>
+    );
 }
-
-// Helper component to listen for mousemove/up during resize
-// (kept for completeness, but only defined once)
