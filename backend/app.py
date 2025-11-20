@@ -115,62 +115,120 @@ async def enrich_section(payload: dict):
     title = payload.get('title', '')
     content = payload.get('content', '')
     num = int(payload.get('num_points', 3) or 3)
+    include_charts = bool(payload.get('include_charts', False))
+    include_frameworks = bool(payload.get('include_frameworks', False))
     if not content:
         return {"error": "content is required"}
 
-    # Stronger prompt: request NEW, non-redundant, actionable bullets that expand the content
-    prompt = (
+    # Build an instruction to optionally include charts/frameworks
+    # If charts/frameworks are requested, ask the LLM to return a JSON object with bullets and optional charts/frameworks
+    instruction = (
         f"Generate {num} NEW, non-redundant, actionable bullet points that EXPAND on the input section. "
         "Do NOT merely rephrase the original content — add concrete, novel ideas, examples, or next steps that build on it. "
         "Each bullet should be concise (1-2 sentences) and focused on practical recommendations or specific elaborations. "
         "When helpful, include an example, metric, or brief suggested action.\n\n"
         f"Title: {title}\nContent: {content}\n\n"
-        "IMPORTANT: Return ONLY a valid JSON array of strings (e.g. [\"bullet 1\", \"bullet 2\"]). Do not include any markdown, backticks, explanatory text, or trailing commas."
     )
+
+    if include_charts or include_frameworks:
+        # Request structured JSON with bullets and optional charts/frameworks
+        prompt = (
+            instruction +
+            "Return ONLY a JSON object with the following optional keys: 'bullets' (array of strings), 'charts' (array of objects), 'frameworks' (array of strings or objects). "
+            "Each chart object should include 'type' (one of known chart names, e.g., 'Bar Chart') and 'data' (array of datapoints like [{\"label\":.., \"value\":..}]). "
+            "Each framework should be a name from DATA_FRAMEWORKS; optionally include framework-specific data in a 'framework_data' object. "
+            "Do NOT include any extra text outside the JSON. Ensure valid JSON."
+        )
+    else:
+        prompt = instruction + "IMPORTANT: Return ONLY a valid JSON array of strings (e.g. [\"bullet 1\", \"bullet 2\"]). Do not include any markdown, backticks, explanatory text, or trailing commas."
+
     try:
         completion = openai_client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
-                {"role": "system", "content": "You are a helpful assistant that writes concise, actionable slide bullets."},
+                {"role": "system", "content": "You are a helpful assistant that writes concise, actionable slide bullets and, when requested, suggests charts and frameworks in JSON format."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.35,
-            max_tokens=400,
+            max_tokens=600,
         )
         text = completion.choices[0].message.content.strip()
-        import json as _json
-        # Try to extract a JSON array from the model output (handles cases where model adds surrounding text)
+        # Try to parse JSON robustly. Prefer repair_json if available.
+        parsed = None
         try:
-            m = re.search(r'(\[.*\])', text, re.DOTALL)
-            candidate = m.group(1) if m else text
-            # Remove common trailing commas before closing bracket
-            candidate = re.sub(r',\s*(\])', r'\1', candidate)
-            arr = _json.loads(candidate)
-            if isinstance(arr, list):
-                cleaned = [str(x).strip() for x in arr if str(x).strip()]
-                return {"bullets": cleaned[:num]}
+            from json_repair import repair_json as _repair
+            repaired = _repair(text)
+            parsed = json.loads(repaired)
         except Exception:
-            # fallback: split by newlines and clean
-            lines = [l.strip() for l in text.split('\n') if l.strip()]
-            cleaned = []
-            for l in lines:
-                # remove numbering/bullets like "1.", "-", "•"
-                s = re.sub(r'^\s*(?:\d+\.|[-•\u2022])\s*', '', l).strip()
-                # strip surrounding quotes and trailing commas
-                s = re.sub(r'^["\']|["\']$|,$', '', s).strip()
-                if s:
-                    cleaned.append(s)
-            # If cleaned is empty, fall back to the original content plus a small generated suggestion
-            if not cleaned:
-                cleaned = [content.strip()] if content.strip() else []
-            # If the model only reframed the input (single item equal to input), try to append an example
-            if len(cleaned) == 1 and cleaned[0].lower().startswith(content.strip().lower()[:30]):
-                base = cleaned[0]
-                extra = base
-                if 'example' not in base.lower():
-                    extra = base + ' For example, run a short pilot to validate and measure results.'
-                cleaned = [base, extra][:num]
+            try:
+                # Attempt to extract JSON substring
+                m = re.search(r'(\{.*\}|\[.*\])', text, re.DOTALL)
+                candidate = m.group(1) if m else text
+                candidate = re.sub(r',\s*(\]|\})', r'\1', candidate)
+                parsed = json.loads(candidate)
+            except Exception:
+                parsed = None
+
+        # If parsed is an array (legacy), return as bullets
+        if isinstance(parsed, list):
+            cleaned = [str(x).strip() for x in parsed if str(x).strip()]
             return {"bullets": cleaned[:num]}
+
+        # If parsed is an object, extract fields
+        if isinstance(parsed, dict):
+            bullets = []
+            charts = []
+            frameworks = []
+            if parsed.get('bullets') and isinstance(parsed.get('bullets'), list):
+                bullets = [str(x).strip() for x in parsed.get('bullets') if str(x).strip()]
+            # Support older key 'enriched' or similar
+            elif parsed.get('enriched'):
+                if isinstance(parsed.get('enriched'), list):
+                    bullets = [str(x).strip() for x in parsed.get('enriched')]
+                else:
+                    bullets = [str(parsed.get('enriched'))]
+
+            if include_charts and parsed.get('charts') and isinstance(parsed.get('charts'), list):
+                for c in parsed.get('charts'):
+                    # ensure minimal shape
+                    try:
+                        ctype = c.get('type') if isinstance(c, dict) else None
+                        cdata = c.get('data') if isinstance(c, dict) else None
+                        if ctype and cdata:
+                            charts.append({'type': ctype, 'data': cdata})
+                    except Exception:
+                        continue
+
+            if include_frameworks and parsed.get('frameworks'):
+                if isinstance(parsed.get('frameworks'), list):
+                    frameworks = parsed.get('frameworks')
+                else:
+                    frameworks = [parsed.get('frameworks')]
+
+            result = {"bullets": bullets[:num]}
+            if charts:
+                result['charts'] = charts
+            if frameworks:
+                result['frameworks'] = frameworks
+            return result
+
+        # Fallback: try previous newline-splitting behavior on raw text
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        cleaned = []
+        for l in lines:
+            s = re.sub(r'^\s*(?:\d+\.|[-•\u2022])\s*', '', l).strip()
+            s = re.sub(r'^["\']|["\']$|,$', '', s).strip()
+            if s:
+                cleaned.append(s)
+        if not cleaned:
+            cleaned = [content.strip()] if content.strip() else []
+        if len(cleaned) == 1 and cleaned[0].lower().startswith(content.strip().lower()[:30]):
+            base = cleaned[0]
+            extra = base
+            if 'example' not in base.lower():
+                extra = base + ' For example, run a short pilot to validate and measure results.'
+            cleaned = [base, extra][:num]
+        return {"bullets": cleaned[:num]}
     except Exception as e:
         return {"error": str(e)}
 
