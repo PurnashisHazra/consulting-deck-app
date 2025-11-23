@@ -463,7 +463,36 @@ function App() {
   const [useMockData, setUseMockData] = useState(false);
   const [userName, setUserName] = useState("User");
   const [userCoins, setUserCoins] = useState(0);
+  const [currentSavedDeckId, setCurrentSavedDeckId] = useState(null);
+  const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false);
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+  const [showEnrichTooltip, setShowEnrichTooltip] = useState(false);
+
+  const showEnrichTip = (message) => {
+    const bulb = (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+        <path d="M9 18h6v1a1 1 0 01-1 1H10a1 1 0 01-1-1v-1z" fill="#fbbf24" />
+        <path d="M12 3a5 5 0 00-3 9c0 1.657 1 3 1 3h4s1-1.343 1-3a5 5 0 00-3-9z" fill="#f59e0b" />
+        <path d="M11 21h2v-2h-2v2z" fill="#92400e" />
+      </svg>
+    );
+    toast(
+      (<div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        <div style={{ marginTop: 2 }}>{bulb}</div>
+        <div style={{ lineHeight: 1.2 }}>{message}</div>
+      </div>),
+      {
+        duration: 6000,
+        style: {
+          border: '1px solid #f59e0b',
+          background: '#fffbeb',
+          color: '#92400e',
+          padding: '10px 12px',
+          borderRadius: 8,
+        }
+      }
+    );
+  };
   const navigate = useNavigate();
   const { isAuthenticated, setIsAuthenticated, token, setToken } = useContext(AuthContext);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
@@ -581,8 +610,11 @@ function App() {
         }
          // Pass token or other user details if needed
         const result = await generateSlides(payload, token);
-        setSlides(result.slides);
-        setOptimizedStoryline(result.optimized_storyline || []);
+  setSlides(result.slides);
+  setOptimizedStoryline(result.optimized_storyline || []);
+  // show a short tooltip guide for enrich buttons
+  setShowEnrichTooltip(true);
+  showEnrichTip('Use the "Enrich content" button on each section to auto-generate bullets, charts, or frameworks.');
         // Auto-save the generated deck for the user (if authenticated)
         try {
           if (isAuthenticated && token) {
@@ -838,7 +870,12 @@ function App() {
                                       const deck = d.deck || d;
                                       setSlides(deck.slides || []);
                                       setOptimizedStoryline(deck.optimized_storyline || []);
+                                      // track that we're editing this saved deck
+                                      setCurrentSavedDeckId(d.deck_id || d._id || null);
                                       setShowSavedDecksDropdown(false);
+                                      // show enrich tooltip when viewing a saved deck
+                                      setShowEnrichTooltip(true);
+                                      showEnrichTip('Want more detail? Click "Enrich content" on any section to add bullets, charts, or frameworks.');
                                     } catch (e) {
                                       console.error('Failed to load deck', e);
                                     }
@@ -864,14 +901,18 @@ function App() {
                         </button> */}
                         
                         <button
-                          onClick={async () => {
+                            onClick={async () => {
                             if (!isAuthenticated || !token) {
                               toast.error('Please sign in to save decks');
                               return;
                             }
                             try {
                               const deckPayload = { slides, optimized_storyline: optimizedStoryline, title: slides?.[0]?.title || 'Untitled' };
-                              await saveDeck(deckPayload, token);
+                              // If editing an existing saved deck, include deck_id so backend will update instead of inserting
+                              if (currentSavedDeckId) deckPayload.deck_id = currentSavedDeckId;
+                              const saveRes = await saveDeck(deckPayload, token);
+                              // If backend returned a deck_id, keep track of it
+                              if (saveRes && saveRes.deck_id) setCurrentSavedDeckId(saveRes.deck_id);
                               toast.success('Deck saved');
                               // Refresh saved decks list
                               try {
@@ -939,6 +980,17 @@ function App() {
                         setUseMockData(true);
                         setSlides(mockResponse.slides);
                         setOptimizedStoryline(mockResponse.optimized_storyline);
+                      }}
+                      token={token}
+                      setUserCoins={setUserCoins}
+                      userCoins={userCoins}
+                      showEnrichTooltip={showEnrichTooltip}
+                      onEdit={() => {
+                        if (!hasUnsavedEdits) {
+                          setHasUnsavedEdits(true);
+                          // floating reminder to save edits
+                          showEnrichTip('You have unsaved edits — click "Save Deck" to save your changes.');
+                        }
                       }}
                       />
                     </div>

@@ -9,7 +9,7 @@ import EnrichConfirmModal from './EnrichConfirmModal';
 import { parseListItems } from '../utils/parseList';
 import { ENABLE_INLINE_EDITING } from '../config';
 
-export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex = 0, setCurrentSlideIndex, optimizedStoryline, onGenerateMockSlides }) {
+export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex = 0, setCurrentSlideIndex, optimizedStoryline, onGenerateMockSlides, token, setUserCoins, userCoins, showEnrichTooltip }) {
     const [slideCanvasState, setSlideCanvasState] = useState({});
     const [editingMap, setEditingMap] = useState({});
     const [editingValues, setEditingValues] = useState({});
@@ -19,10 +19,22 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
     const [showPaletteSelector, setShowPaletteSelector] = useState(false);
     const [borderWidth, setBorderWidth] = useState(1);
     const [fontScale, setFontScale] = useState(1);
-    const [canvasBackgroundColor, setCanvasBackgroundColor] = useState('#ffffffff');
+    const [canvasBackgroundColor, setCanvasBackgroundColor] = useState('#ffffff');
     const [showColorPicker, setShowColorPicker] = useState(false);
     const [activeEditId, setActiveEditId] = useState(null);
     const canvasRef = useRef(null);
+    const [tooltipShown, setTooltipShown] = useState(false);
+    const [tooltipVisible, setTooltipVisible] = useState(false);
+
+    // When parent requests showing the enrich tooltip (after generation or loading), show it briefly
+    useEffect(() => {
+        if (showEnrichTooltip && !tooltipShown) {
+            setTooltipVisible(true);
+            setTooltipShown(true);
+            const t = setTimeout(() => setTooltipVisible(false), 4000);
+            return () => clearTimeout(t);
+        }
+    }, [showEnrichTooltip, tooltipShown]);
 
     // Professional consulting color palettes
     const COLOR_PALETTES = {
@@ -113,7 +125,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
     }, [selectedPalette]);
 
     // Canvas dimensions - match image proportions
-    const CANVAS_WIDTH = 0.81 * window.innerWidth;
+    const CANVAS_WIDTH = 0.9 * window.innerWidth;
     const CANVAS_HEIGHT = 0.9* window.innerHeight;
     // Reserve space for bottom toolbar when in fullscreen (px)
     const TOOLBAR_HEIGHT = 64;
@@ -134,6 +146,38 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
     const ACTIVE_CANVAS_WIDTH = isFullScreen ? viewportWidth : CANVAS_WIDTH;
     const ACTIVE_CANVAS_HEIGHT = isFullScreen ? Math.max(200, viewportHeight - TOOLBAR_HEIGHT) : CANVAS_HEIGHT;
 
+    // Measured canvas dimensions (use DOM size when available to handle responsive containers)
+    const [measuredSize, setMeasuredSize] = useState({ width: CANVAS_WIDTH, height: CANVAS_HEIGHT });
+
+    useEffect(() => {
+        const node = canvasRef && canvasRef.current;
+        if (!node) return;
+        const measure = () => {
+            try {
+                const rect = node.getBoundingClientRect();
+                setMeasuredSize({ width: Math.max(100, Math.round(rect.width)), height: Math.max(100, Math.round(rect.height)) });
+            } catch (e) {
+                setMeasuredSize({ width: CANVAS_WIDTH, height: CANVAS_HEIGHT });
+            }
+        };
+        measure();
+        let ro;
+        if (typeof window !== 'undefined' && window.ResizeObserver) {
+            ro = new ResizeObserver(() => measure());
+            try { ro.observe(node); } catch (e) { /* ignore */ }
+        } else {
+            window.addEventListener('resize', measure);
+        }
+        return () => {
+            if (ro) try { ro.disconnect(); } catch (e) { }
+            else window.removeEventListener('resize', measure);
+        };
+    }, [canvasRef, isFullScreen]);
+
+    // Use measured DOM size when not fullscreen for accurate layout and drag bounds
+    const EFFECTIVE_CANVAS_WIDTH = isFullScreen ? ACTIVE_CANVAS_WIDTH : (measuredSize.width || CANVAS_WIDTH);
+    const EFFECTIVE_CANVAS_HEIGHT = isFullScreen ? ACTIVE_CANVAS_HEIGHT : (measuredSize.height || CANVAS_HEIGHT);
+
     // Generate beautifully arranged canvas items from backend layout
     const getDefaultCanvasItems = (slide) => {
         if (!slide) return [];
@@ -149,14 +193,14 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
         }
 
         // Calculate cell dimensions based on layout
-        const rows = layout.rows || 2;
-        const cols = layout.columns || 2;
+        const rows = layout.rows || 1;
+        const cols = layout.columns || 1;
 
         // Calculate available space more precisely
         const totalHorizontalGaps = GAP * Math.max(0, cols - 1);
         const totalVerticalGaps = GAP * Math.max(0, rows - 1);
-    const availableWidth = ACTIVE_CANVAS_WIDTH - (PADDING * 2) - totalHorizontalGaps;
-    const availableHeight = ACTIVE_CANVAS_HEIGHT - (PADDING * 2) - totalVerticalGaps;
+    const availableWidth = EFFECTIVE_CANVAS_WIDTH - (PADDING * 2) - totalHorizontalGaps;
+    const availableHeight = EFFECTIVE_CANVAS_HEIGHT - (PADDING * 2) - totalVerticalGaps;
 
         const cellWidth = availableWidth / cols;
         const cellHeight = availableHeight / rows;
@@ -171,16 +215,16 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
             // Calculate position and size with bounds checking
             const x = Math.max(PADDING, Math.min(
                 PADDING + (col * (cellWidth + GAP)),
-                ACTIVE_CANVAS_WIDTH - PADDING - 200 // Ensure minimum width
+                EFFECTIVE_CANVAS_WIDTH - PADDING -200 // Ensure minimum width
             ));
             const y = Math.max(PADDING, Math.min(
                 PADDING + (row * (cellHeight + GAP)),
-                ACTIVE_CANVAS_HEIGHT - PADDING - 150 // Ensure minimum height
+                EFFECTIVE_CANVAS_HEIGHT - PADDING   // Ensure minimum height
             ));
             
             // Calculate width and height ensuring they fit within canvas
-            const maxWidth = ACTIVE_CANVAS_WIDTH - x - PADDING;
-            const maxHeight = ACTIVE_CANVAS_HEIGHT - y - PADDING;
+            const maxWidth = EFFECTIVE_CANVAS_WIDTH - x - PADDING;
+            const maxHeight = EFFECTIVE_CANVAS_HEIGHT - y - PADDING;
             const width = Math.min(
                 (cellWidth * colSpan) + (GAP * (colSpan - 1)),
                 maxWidth
@@ -241,10 +285,10 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
         // Create default 2x2 grid layout
         const totalHorizontalGaps = GAP * 1; // 1 gap for 2 columns
         const totalVerticalGaps = GAP * 1; // 1 gap for 2 rows
-    const availableWidth = ACTIVE_CANVAS_WIDTH - (PADDING * 2) - totalHorizontalGaps;
-    const availableHeight = ACTIVE_CANVAS_HEIGHT - (PADDING * 2) - totalVerticalGaps;
-    const cellWidth = availableWidth / 2;
-        const cellHeight = availableHeight / 2;
+        const availableWidth = EFFECTIVE_CANVAS_WIDTH - (PADDING * 2) - totalHorizontalGaps;
+        const availableHeight = EFFECTIVE_CANVAS_HEIGHT - (PADDING * 2) - totalVerticalGaps;
+        const cellWidth = availableWidth / 2;
+            const cellHeight = availableHeight / 2;
 
         return [
             {
@@ -310,6 +354,48 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
             return { ...prev, [currentSlideIndex]: newItems };
         });
     };
+
+    // Recalculate layout on resize or slide change. Debounced to avoid thrash during continuous resize.
+    useEffect(() => {
+        let timer = null;
+        const recalc = () => {
+            const slide = currentSlide;
+            if (!slide) return;
+            try {
+                const defaultItems = getDefaultCanvasItems(slide);
+                setSlideCanvasState(prev => {
+                    const existing = prev[currentSlideIndex] || [];
+                    const existingMap = {};
+                    existing.forEach(it => { existingMap[it.id] = it; });
+
+                    const merged = defaultItems.map(it => {
+                        const ex = existingMap[it.id];
+                        if (!ex) return it;
+                        // Preserve user content and metadata, but update position/size from computed layout
+                        return {
+                            ...ex,
+                            x: it.x,
+                            y: it.y,
+                            width: it.width,
+                            height: it.height,
+                            // ensure zIndex and other props from existing are preserved
+                            zIndex: ex.zIndex ?? it.zIndex,
+                        };
+                    });
+                    return { ...prev, [currentSlideIndex]: merged };
+                });
+            } catch (e) {
+                console.warn('Failed to recalc layout on resize', e);
+            }
+        };
+
+        // small debounce
+        timer = setTimeout(recalc, 100);
+        return () => {
+            if (timer) clearTimeout(timer);
+        };
+    // Re-run when effective canvas size or slide changes
+    }, [EFFECTIVE_CANVAS_WIDTH, EFFECTIVE_CANVAS_HEIGHT, currentSlideIndex, slides, isFullScreen]);
 
     const handleDrag = (e, data, id) => {
         setCanvasItems(items =>
@@ -760,10 +846,17 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                                 {item.type === "custom" && Array.isArray(item.data) && (
                                     <button className="text-xs text-green-700 bg-white px-2 py-1 rounded shadow hover:bg-green-50" onClick={() => addListItem(item.id)} title="Add point">+</button>
                                 )}
-                                <button className="text-xs text-yellow-700 bg-white px-2 py-1 rounded shadow hover:bg-yellow-50" onClick={() => {
-                                    const initial = Array.isArray(item.data) ? item.data.join('\n') : String(item.data || '');
-                                    setEnrichModal({ open: true, itemId: item.id, initialContent: initial });
-                                }} title="Enrich section">✚</button>
+                                                                <div className="relative">
+                                                                    <button className="text-xs text-yellow-700 bg-white px-2 py-1 rounded shadow hover:bg-yellow-50" onClick={() => {
+                                                                            const initial = Array.isArray(item.data) ? item.data.join('\n') : String(item.data || '');
+                                                                            setEnrichModal({ open: true, itemId: item.id, initialContent: initial });
+                                                                    }} title="Enrich section">Enrich content</button>
+                                                                    {tooltipVisible && (
+                                                                        <div className="absolute -top-8 right-0 bg-yellow-100 border border-yellow-300 text-yellow-900 text-xs px-2 py-1 rounded shadow" style={{ whiteSpace: 'nowrap', zIndex: 40 }}>
+                                                                            Try "Enrich content" to auto-generate bullets, charts, or frameworks for this section
+                                                                        </div>
+                                                                    )}
+                                                                </div>
                                 <button className="text-xs text-blue-700 bg-white px-2 py-1 rounded shadow hover:bg-blue-50" onClick={() => bringToFront(item.id)} title="Bring to front">↑</button>
                                 <button className="text-xs text-blue-700 bg-white px-2 py-1 rounded shadow hover:bg-blue-50" onClick={() => sendToBack(item.id)} title="Send to back">↓</button>
                                 <button className="text-xs text-red-600 bg-white px-2 py-1 rounded shadow hover:bg-red-50" onClick={() => handleDelete(item.id)}>🗑</button>
@@ -1123,7 +1216,36 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                 open={enrichModal.open}
                 initialContent={enrichModal.initialContent}
                 onClose={() => setEnrichModal({ open: false, itemId: null, initialContent: '' })}
-                onDone={(content) => applyEnrichedContent(enrichModal.itemId, content)}
+                userCoins={userCoins}
+                onDone={async (content) => {
+                    try {
+                        // Apply the enriched content locally first
+                        applyEnrichedContent(enrichModal.itemId, content);
+
+                        // Consume half a coin for enrichment by calling backend
+                        if (token) {
+                            const res = await fetch(`${process.env.REACT_APP_API_BASE_URL || ''}/auth/consume_coin`, {
+                                method: 'POST',
+                                headers: {
+                                    'Authorization': `Bearer ${token}`,
+                                    'Content-Type': 'application/json',
+                                },
+                                body: JSON.stringify({ num_slides: 0.5 })
+                            });
+                            if (res.ok) {
+                                const data = await res.json();
+                                if (typeof setUserCoins === 'function') setUserCoins(data.coins);
+                            } else {
+                                const err = await res.json().catch(() => ({}));
+                                alert(err.detail || 'Failed to consume coin for enrichment');
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Enrichment completed but coin consumption failed', err);
+                    } finally {
+                        setEnrichModal({ open: false, itemId: null, initialContent: '' });
+                    }
+                }}
             />
         </>
     );

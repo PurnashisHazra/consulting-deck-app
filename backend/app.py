@@ -131,14 +131,19 @@ async def enrich_section(payload: dict):
     )
 
     if include_charts or include_frameworks:
-        # Request structured JSON with bullets and optional charts/frameworks
-        prompt = (
-            instruction +
-            "Return ONLY a JSON object with the following optional keys: 'bullets' (array of strings), 'charts' (array of objects), 'frameworks' (array of strings or objects). "
-            "Each chart object should include 'type' (one of known chart names, e.g., 'Bar Chart') and 'data' (array of datapoints like [{\"label\":.., \"value\":..}]). "
-            "Each framework should be a name from DATA_FRAMEWORKS; optionally include framework-specific data in a 'framework_data' object. "
-            "Do NOT include any extra text outside the JSON. Ensure valid JSON."
-        )
+        # Request structured JSON with bullets and require charts/frameworks when asked
+        parts = [instruction]
+        parts.append("Return ONLY a single JSON object. The response MUST include a 'bullets' key with an array of strings.")
+        if include_charts:
+            parts.append("Because charts were requested, the response MUST include a 'charts' key with at least one chart object. Each chart object should include 'type' (e.g., 'Bar Chart') and 'data' (array of datapoints like [{\"label\":.., \"value\":..}]).")
+        else:
+            parts.append("If charts are helpful you may include a 'charts' array, but it's optional.")
+        if include_frameworks:
+            parts.append("Because frameworks were requested, the response MUST include a 'frameworks' key with at least one framework (either a string name from DATA_FRAMEWORKS or an object with 'name' and optional 'data').")
+        else:
+            parts.append("If frameworks are helpful you may include a 'frameworks' array, but it's optional.")
+        parts.append("Do NOT include any extra text outside the JSON. Ensure valid JSON and do not include explanatory text.")
+        prompt = "\n\n".join(parts)
     else:
         prompt = instruction + "IMPORTANT: Return ONLY a valid JSON array of strings (e.g. [\"bullet 1\", \"bullet 2\"]). Do not include any markdown, backticks, explanatory text, or trailing commas."
 
@@ -204,6 +209,30 @@ async def enrich_section(payload: dict):
                     frameworks = parsed.get('frameworks')
                 else:
                     frameworks = [parsed.get('frameworks')]
+
+            # If user explicitly requested charts/frameworks but model did not return them,
+            # synthesize safe defaults so frontend always receives content to insert.
+            if include_charts and not charts:
+                try:
+                    # Provide a default bar chart with generated dummy data
+                    default_chart = {"type": "Bar Chart", "data": generate_dummy_data('bar', content)}
+                    charts.append(default_chart)
+                except Exception:
+                    charts = []
+            if include_frameworks and not frameworks:
+                try:
+                    # Heuristic: pick the first framework that mentions 'strategy' or default to the first framework
+                    fw_choice = None
+                    for fw in DATA_FRAMEWORKS:
+                        if 'strategy' in (fw.get('use_cases') or []) or 'strategy' in (fw.get('name') or '').lower():
+                            fw_choice = fw.get('name')
+                            break
+                    if not fw_choice and DATA_FRAMEWORKS:
+                        fw_choice = DATA_FRAMEWORKS[0].get('name')
+                    if fw_choice:
+                        frameworks.append(fw_choice)
+                except Exception:
+                    frameworks = []
 
             result = {"bullets": bullets[:num]}
             if charts:
@@ -1240,13 +1269,50 @@ async def save_deck(deck: dict, authorization: str = Header(None)):
     email = user_details.get("name")
     if not email:
         raise HTTPException(status_code=401, detail="User not found")
-    deck_doc = {
-        "email": user_details.get("email", email),
-        "deck": deck,
-        "created_at": pd.Timestamp.now().isoformat()
-    }
-    await decks_collection.insert_one(deck_doc)
-    return {"success": True}
+
+    # allow clients to pass a deck_id to update an existing saved deck
+    deck_id = None
+    if isinstance(deck, dict):
+        deck_id = deck.get('deck_id') or deck.get('_id') or deck.get('id')
+
+    now_iso = pd.Timestamp.now().isoformat()
+    if deck_id:
+        try:
+            from bson import ObjectId
+            oid = ObjectId(str(deck_id))
+            # Try to update existing deck owned by this user
+            res = await decks_collection.update_one({"_id": oid, "email": user_details.get('email')}, {"$set": {"deck": deck, "created_at": now_iso}})
+            if res.matched_count:
+                # Update the user's saved_decks summary entry if present
+                title = (deck.get('title') or (deck.get('slides') or [{}])[0].get('title') or 'Untitled')
+                num_slides = deck.get('num_slides') or len(deck.get('slides', []))
+                await users_collection.update_one({"email": user_details.get('email'), "saved_decks.deck_id": str(oid)}, {"$set": {"saved_decks.$.title": title, "saved_decks.$.num_slides": num_slides, "saved_decks.$.created_at": now_iso}})
+                return {"success": True, "updated": True, "deck_id": str(oid)}
+            else:
+                # No matching deck found; fall back to insert
+                deck_doc = {"email": user_details.get('email'), "deck": deck, "created_at": now_iso}
+                inserted = await decks_collection.insert_one(deck_doc)
+                new_id = str(inserted.inserted_id)
+                summary = {"title": deck.get('title') or (deck.get('slides') or [{}])[0].get('title') or 'Untitled', "num_slides": len(deck.get('slides', [])), "created_at": now_iso, "deck_id": new_id}
+                await users_collection.update_one({"email": user_details.get('email')}, {"$push": {"saved_decks": summary}})
+                return {"success": True, "deck_id": new_id}
+        except Exception as e:
+            print('Error updating deck:', e)
+            # fallback: insert as new
+            deck_doc = {"email": user_details.get('email'), "deck": deck, "created_at": now_iso}
+            inserted = await decks_collection.insert_one(deck_doc)
+            new_id = str(inserted.inserted_id)
+            summary = {"title": deck.get('title') or (deck.get('slides') or [{}])[0].get('title') or 'Untitled', "num_slides": len(deck.get('slides', [])), "created_at": now_iso, "deck_id": new_id}
+            await users_collection.update_one({"email": user_details.get('email')}, {"$push": {"saved_decks": summary}})
+            return {"success": True, "deck_id": new_id}
+    else:
+        # Insert new deck
+        deck_doc = {"email": user_details.get('email'), "deck": deck, "created_at": now_iso}
+        inserted = await decks_collection.insert_one(deck_doc)
+        new_id = str(inserted.inserted_id)
+        summary = {"title": deck.get('title') or (deck.get('slides') or [{}])[0].get('title') or 'Untitled', "num_slides": len(deck.get('slides', [])), "created_at": now_iso, "deck_id": new_id}
+        await users_collection.update_one({"email": user_details.get('email')}, {"$push": {"saved_decks": summary}})
+        return {"success": True, "deck_id": new_id}
 
 @app.get("/my_decks")
 async def my_decks(authorization: str = Header(None)):

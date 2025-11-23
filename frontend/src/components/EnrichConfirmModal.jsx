@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../api';
 
-export default function EnrichConfirmModal({ open, initialContent = '', onClose, onDone }) {
+export default function EnrichConfirmModal({ open, initialContent = '', onClose, onDone, userCoins = 0 }) {
   const [local, setLocal] = useState(initialContent || '');
   const [isEnriching, setIsEnriching] = useState(false);
   const [includeCharts, setIncludeCharts] = useState(false);
@@ -140,15 +140,17 @@ export default function EnrichConfirmModal({ open, initialContent = '', onClose,
         <div className="flex justify-between items-center">
           <div>
             <button className="px-3 py-2 bg-gray-100 rounded mr-2" onClick={() => onClose()}>Cancel</button>
-            <button className="px-3 py-2 bg-blue-600 text-white rounded" onClick={() => {
+            <button className="px-3 py-2 bg-blue-600 text-white rounded" disabled={userCoins < 0.5} onClick={() => {
               // Build structured result
               const selectedChartObjects = selectedCharts.map(i => suggestedCharts[i]).filter(Boolean);
               const selectedFrameworkObjects = selectedFrameworks.map(i => suggestedFrameworks[i]).filter(Boolean);
               onDone({ text: local, bullets: local.split('\n').map(s => s.trim()).filter(Boolean), charts: selectedChartObjects, frameworks: selectedFrameworkObjects });
             }}>Done</button>
+            {userCoins < 0.5 && (<div className="text-xs text-red-500 mt-1">You need at least 0.5 coins to enrich content.</div>)}
           </div>
           <div>
-            <button className="px-3 py-2 bg-white border rounded text-sm" onClick={enrichWithAI} disabled={isEnriching}>{isEnriching ? 'Enriching...' : 'Enrich with AI'}</button>
+            <button className="px-3 py-2 bg-white border rounded text-sm" onClick={enrichWithAI} disabled={isEnriching || userCoins < 0.5}>{isEnriching ? 'Enriching...' : 'Enrich with AI'}</button>
+            {userCoins < 0.5 && (<div className="text-xs text-red-500 mt-1">Not enough coins to use AI enrichment.</div>)}
           </div>
         </div>
       </div>
