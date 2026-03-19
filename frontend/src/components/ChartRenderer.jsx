@@ -415,7 +415,8 @@ export default function ChartRenderer({
   yAxisTitle,
   legend,
   inferences,
-  palette // optional array of hex strings
+  palette, // optional array of hex strings
+  height = 250 // allow parent to control rendered height
 }) {
   const COLORS = normalizePalette(palette);
   const getColor = (i) => COLORS[i % COLORS.length];
@@ -435,7 +436,7 @@ export default function ChartRenderer({
   if (rechartsTypes.includes(type)) {
     chartContent = (
       type === "Bar Chart" ? (
-        <ResponsiveContainer width="100%" height={250}>
+        <ResponsiveContainer width="100%" height={height}>
           <BarChart data={Array.isArray(plotData) && plotData.length > 0 ? plotData : dummyData["Bar Chart"]} margin={{ top: 30, right: 40, left: 50, bottom: 40 }}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis
@@ -459,7 +460,7 @@ export default function ChartRenderer({
           </BarChart>
         </ResponsiveContainer>
       ) : type === "Line Chart" ? (
-        <ResponsiveContainer width="100%" height={250}>
+  <ResponsiveContainer width="100%" height={height}>
           <LineChart data={plotData} margin={{ top: 30, right: 40, left: 50, bottom: 40 }}>
             <XAxis
               dataKey="label"
@@ -493,7 +494,7 @@ export default function ChartRenderer({
           </LineChart>
         </ResponsiveContainer>
       ) : type === "Pie Chart" ? (
-        <ResponsiveContainer width="100%" height={250}>
+  <ResponsiveContainer width="100%" height={height}>
           <PieChart margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
             <Pie
               data={plotData}
@@ -529,7 +530,7 @@ export default function ChartRenderer({
       histData = buildHistogramData([]);
     }
     chartContent = (
-      <ResponsiveContainer width="100%" height={250}>
+      <ResponsiveContainer width="100%" height={height}>
         <BarChart data={histData} margin={{ top: 30, right: 40, left: 50, bottom: 40 }}>
           <XAxis dataKey="label" />
           <YAxis />
@@ -559,12 +560,13 @@ export default function ChartRenderer({
       }));
     }
     chartContent = (
-      <div style={{ width: 250, height: 250 }}>
+      <div style={{ width: '100%', height: height }}>
         <ChartJSComponent
           data={chartJSData}
           options={{
             indexAxis: 'y',
             responsive: true,
+            maintainAspectRatio: false,
             plugins: { legend: { display: false }, title: { display: true, text: type } },
             scales: {
               x: { stacked: true },
@@ -586,12 +588,13 @@ export default function ChartRenderer({
       }));
     }
     chartContent = (
-      <div style={{ width: '100%', height: 250 }}>
+      <div style={{ width: '100%', height: height }}>
         <ChartJSComponent
           data={chartJSData}
           options={{
             indexAxis: 'y', // rotate bars horizontally
             responsive: true,
+            maintainAspectRatio: false,
             plugins: { legend: { display: true }, title: { display: true, text: type } },
             scales: {
               x: { stacked: true },
@@ -624,8 +627,8 @@ export default function ChartRenderer({
       }
     };
     chartContent = ChartJSComponent ? (
-      <div style={{ width: '100%', height: 250 }}>
-        <ChartJSComponent data={chartJSData} options={chartOptions} />
+      <div style={{ width: '100%', height: height }}>
+        <ChartJSComponent data={chartJSData} options={{ ...chartOptions, maintainAspectRatio: false }} />
       </div>
     ) : null;
   } else {

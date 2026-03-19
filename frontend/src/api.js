@@ -54,3 +54,20 @@ export async function saveDeck(deck, token) {
   }
   return await res.json();
 }
+
+export async function suggestInfographics(payload, token) {
+  const ep = '/suggest_infographics';
+  const res = await fetch(`${API_BASE_URL}${ep}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => null);
+    throw new Error(`Failed to suggest infographics: ${res.status} ${txt || ''}`);
+  }
+  return await res.json();
+}

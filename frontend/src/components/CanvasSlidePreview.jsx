@@ -9,7 +9,7 @@ import EnrichConfirmModal from './EnrichConfirmModal';
 import { parseListItems } from '../utils/parseList';
 import { ENABLE_INLINE_EDITING } from '../config';
 
-export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex = 0, setCurrentSlideIndex, optimizedStoryline, onGenerateMockSlides, token, setUserCoins, userCoins, showEnrichTooltip }) {
+export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex = 0, setCurrentSlideIndex, optimizedStoryline, onGenerateMockSlides }) {
     const [slideCanvasState, setSlideCanvasState] = useState({});
     const [editingMap, setEditingMap] = useState({});
     const [editingValues, setEditingValues] = useState({});
@@ -17,24 +17,11 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
     const [clickPosition, setClickPosition] = useState({ x: 100, y: 100 });
     const [selectedPalette, setSelectedPalette] = useState('consulting');
     const [showPaletteSelector, setShowPaletteSelector] = useState(false);
-    const [borderWidth, setBorderWidth] = useState(1);
-    const [fontScale, setFontScale] = useState(1);
-    const [canvasBackgroundColor, setCanvasBackgroundColor] = useState('#ffffff');
+    const [borderWidth, setBorderWidth] = useState(3);
+    const [canvasBackgroundColor, setCanvasBackgroundColor] = useState('#e5e7eb');
     const [showColorPicker, setShowColorPicker] = useState(false);
     const [activeEditId, setActiveEditId] = useState(null);
     const canvasRef = useRef(null);
-    const [tooltipShown, setTooltipShown] = useState(false);
-    const [tooltipVisible, setTooltipVisible] = useState(false);
-
-    // When parent requests showing the enrich tooltip (after generation or loading), show it briefly
-    useEffect(() => {
-        if (showEnrichTooltip && !tooltipShown) {
-            setTooltipVisible(true);
-            setTooltipShown(true);
-            const t = setTimeout(() => setTooltipVisible(false), 4000);
-            return () => clearTimeout(t);
-        }
-    }, [showEnrichTooltip, tooltipShown]);
 
     // Professional consulting color palettes
     const COLOR_PALETTES = {
@@ -125,58 +112,10 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
     }, [selectedPalette]);
 
     // Canvas dimensions - match image proportions
-    const CANVAS_WIDTH = 0.9 * window.innerWidth;
-    const CANVAS_HEIGHT = 0.9* window.innerHeight;
-    // Reserve space for bottom toolbar when in fullscreen (px)
-    const TOOLBAR_HEIGHT = 64;
-    const PADDING = 5;
-    const GAP = 5;
-    // Active canvas width/height: when fullscreen, match viewport size minus toolbar
-    const [viewportWidth, setViewportWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : CANVAS_WIDTH);
-    const [viewportHeight, setViewportHeight] = useState(typeof window !== 'undefined' ? window.innerHeight : CANVAS_HEIGHT);
-    useEffect(() => {
-        const handleResize = () => {
-            setViewportWidth( window.innerWidth || CANVAS_WIDTH);
-            setViewportHeight(window.innerHeight || CANVAS_HEIGHT);
-        };
-        window.addEventListener('resize', handleResize);
-        return () => window.removeEventListener('resize', handleResize);
-    }, []);
-
-    const ACTIVE_CANVAS_WIDTH = isFullScreen ? viewportWidth : CANVAS_WIDTH;
-    const ACTIVE_CANVAS_HEIGHT = isFullScreen ? Math.max(200, viewportHeight - TOOLBAR_HEIGHT) : CANVAS_HEIGHT;
-
-    // Measured canvas dimensions (use DOM size when available to handle responsive containers)
-    const [measuredSize, setMeasuredSize] = useState({ width: CANVAS_WIDTH, height: CANVAS_HEIGHT });
-
-    useEffect(() => {
-        const node = canvasRef && canvasRef.current;
-        if (!node) return;
-        const measure = () => {
-            try {
-                const rect = node.getBoundingClientRect();
-                setMeasuredSize({ width: Math.max(100, Math.round(rect.width)), height: Math.max(100, Math.round(rect.height)) });
-            } catch (e) {
-                setMeasuredSize({ width: CANVAS_WIDTH, height: CANVAS_HEIGHT });
-            }
-        };
-        measure();
-        let ro;
-        if (typeof window !== 'undefined' && window.ResizeObserver) {
-            ro = new ResizeObserver(() => measure());
-            try { ro.observe(node); } catch (e) { /* ignore */ }
-        } else {
-            window.addEventListener('resize', measure);
-        }
-        return () => {
-            if (ro) try { ro.disconnect(); } catch (e) { }
-            else window.removeEventListener('resize', measure);
-        };
-    }, [canvasRef, isFullScreen]);
-
-    // Use measured DOM size when not fullscreen for accurate layout and drag bounds
-    const EFFECTIVE_CANVAS_WIDTH = isFullScreen ? ACTIVE_CANVAS_WIDTH : (measuredSize.width || CANVAS_WIDTH);
-    const EFFECTIVE_CANVAS_HEIGHT = isFullScreen ? ACTIVE_CANVAS_HEIGHT : (measuredSize.height || CANVAS_HEIGHT);
+    const CANVAS_WIDTH = 1400;
+    const CANVAS_HEIGHT = 750;
+    const PADDING = 15;
+    const GAP = 15;
 
     // Generate beautifully arranged canvas items from backend layout
     const getDefaultCanvasItems = (slide) => {
@@ -193,46 +132,27 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
         }
 
         // Calculate cell dimensions based on layout
-        const rows = layout.rows || 1;
-        const cols = layout.columns || 1;
+        const rows = layout.rows || 2;
+        const cols = layout.columns || 2;
 
-        // Calculate available space more precisely
-        const totalHorizontalGaps = GAP * Math.max(0, cols - 1);
-        const totalVerticalGaps = GAP * Math.max(0, rows - 1);
-    const availableWidth = EFFECTIVE_CANVAS_WIDTH - (PADDING * 2) - totalHorizontalGaps;
-    const availableHeight = EFFECTIVE_CANVAS_HEIGHT - (PADDING * 2) - totalVerticalGaps;
+        const availableWidth = CANVAS_WIDTH - (PADDING * 2) - (GAP * (cols - 1));
+        const availableHeight = CANVAS_HEIGHT - (PADDING * 2) - (GAP * (rows - 1));
 
         const cellWidth = availableWidth / cols;
         const cellHeight = availableHeight / rows;
 
         return sections.map((section, idx) => {
             // Get section position (1-indexed from backend, convert to 0-indexed)
-            const row = Math.max(0, Math.min((section.row || 1) - 1, rows - 1));
-            const col = Math.max(0, Math.min((section.col || 1) - 1, cols - 1));
-            const rowSpan = Math.max(1, Math.min(section.rowSpan || 1, rows - row));
-            const colSpan = Math.max(1, Math.min(section.colSpan || 1, cols - col));
+            const row = (section.row || 1) - 1;
+            const col = (section.col || 1) - 1;
+            const rowSpan = section.rowSpan || 1;
+            const colSpan = section.colSpan || 1;
 
-            // Calculate position and size with bounds checking
-            const x = Math.max(PADDING, Math.min(
-                PADDING + (col * (cellWidth + GAP)),
-                EFFECTIVE_CANVAS_WIDTH - PADDING -200 // Ensure minimum width
-            ));
-            const y = Math.max(PADDING, Math.min(
-                PADDING + (row * (cellHeight + GAP)),
-                EFFECTIVE_CANVAS_HEIGHT - PADDING   // Ensure minimum height
-            ));
-            
-            // Calculate width and height ensuring they fit within canvas
-            const maxWidth = EFFECTIVE_CANVAS_WIDTH - x - PADDING;
-            const maxHeight = EFFECTIVE_CANVAS_HEIGHT - y - PADDING;
-            const width = Math.min(
-                (cellWidth * colSpan) + (GAP * (colSpan - 1)),
-                maxWidth
-            );
-            const height = Math.min(
-                (cellHeight * rowSpan) + (GAP * (rowSpan - 1)),
-                maxHeight
-            );
+            // Calculate position and size
+            const x = PADDING + (col * (cellWidth + GAP));
+            const y = PADDING + (row * (cellHeight + GAP));
+            const width = (cellWidth * colSpan) + (GAP * (colSpan - 1));
+            const height = (cellHeight * rowSpan) + (GAP * (rowSpan - 1));
 
             // Determine item type based on content
             let itemType = 'custom';
@@ -283,12 +203,10 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
 
     const createFallbackLayout = (slide) => {
         // Create default 2x2 grid layout
-        const totalHorizontalGaps = GAP * 1; // 1 gap for 2 columns
-        const totalVerticalGaps = GAP * 1; // 1 gap for 2 rows
-        const availableWidth = EFFECTIVE_CANVAS_WIDTH - (PADDING * 2) - totalHorizontalGaps;
-        const availableHeight = EFFECTIVE_CANVAS_HEIGHT - (PADDING * 2) - totalVerticalGaps;
+        const availableWidth = CANVAS_WIDTH - (PADDING * 2) - GAP;
+        const availableHeight = CANVAS_HEIGHT - (PADDING * 2) - GAP;
         const cellWidth = availableWidth / 2;
-            const cellHeight = availableHeight / 2;
+        const cellHeight = availableHeight / 2;
 
         return [
             {
@@ -355,59 +273,11 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
         });
     };
 
-    // Recalculate layout on resize or slide change. Debounced to avoid thrash during continuous resize.
-    useEffect(() => {
-        let timer = null;
-        const recalc = () => {
-            const slide = currentSlide;
-            if (!slide) return;
-            try {
-                const defaultItems = getDefaultCanvasItems(slide);
-                setSlideCanvasState(prev => {
-                    const existing = prev[currentSlideIndex] || [];
-                    const existingMap = {};
-                    existing.forEach(it => { existingMap[it.id] = it; });
-
-                    const merged = defaultItems.map(it => {
-                        const ex = existingMap[it.id];
-                        if (!ex) return it;
-                        // Preserve user content and metadata, but update position/size from computed layout
-                        return {
-                            ...ex,
-                            x: it.x,
-                            y: it.y,
-                            width: it.width,
-                            height: it.height,
-                            // ensure zIndex and other props from existing are preserved
-                            zIndex: ex.zIndex ?? it.zIndex,
-                        };
-                    });
-                    return { ...prev, [currentSlideIndex]: merged };
-                });
-            } catch (e) {
-                console.warn('Failed to recalc layout on resize', e);
-            }
-        };
-
-        // small debounce
-        timer = setTimeout(recalc, 100);
-        return () => {
-            if (timer) clearTimeout(timer);
-        };
-    // Re-run when effective canvas size or slide changes
-    }, [EFFECTIVE_CANVAS_WIDTH, EFFECTIVE_CANVAS_HEIGHT, currentSlideIndex, slides, isFullScreen]);
-
     const handleDrag = (e, data, id) => {
         setCanvasItems(items =>
-            items.map(item => {
-                if (item.id === id) {
-                    // Constrain dragging within canvas bounds
-                    const newX = Math.max(PADDING, Math.min(data.x, ACTIVE_CANVAS_WIDTH - item.width - PADDING));
-                    const newY = Math.max(PADDING, Math.min(data.y, ACTIVE_CANVAS_HEIGHT - item.height - PADDING));
-                    return { ...item, x: newX, y: newY };
-                }
-                return item;
-            })
+            items.map(item =>
+                item.id === id ? { ...item, x: data.x, y: data.y } : item
+            )
         );
     };
 
@@ -434,24 +304,11 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
         const dx = e.clientX - item.startX;
         const dy = e.clientY - item.startY;
         setCanvasItems(items =>
-            items.map(it => {
-                if (it.id === id) {
-                    // Calculate new dimensions
-                    const newWidth = item.startWidth + dx;
-                    const newHeight = item.startHeight + dy;
-                    
-                    // Constrain within canvas bounds
-                    const maxWidth = ACTIVE_CANVAS_WIDTH - item.x - PADDING;
-                    const maxHeight = ACTIVE_CANVAS_HEIGHT - item.y - PADDING;
-                    
-                    return {
-                        ...it,
-                        width: Math.max(200, Math.min(newWidth, maxWidth)),
-                        height: Math.max(150, Math.min(newHeight, maxHeight))
-                    };
-                }
-                return it;
-            })
+            items.map(it =>
+                it.id === id
+                    ? { ...it, width: Math.max(200, item.startWidth + dx), height: Math.max(150, item.startHeight + dy) }
+                    : it
+            )
         );
     };
 
@@ -514,45 +371,9 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
 
     const applyEnrichedContent = (itemId, newContent) => {
         if (itemId == null) return;
-        // newContent may be a structured object from the modal: { text, bullets, charts, frameworks }
-        if (newContent && typeof newContent === 'object' && (newContent.bullets || newContent.charts || newContent.frameworks)) {
-            const bullets = Array.isArray(newContent.bullets) ? newContent.bullets.map(s => String(s).trim()).filter(Boolean) : (typeof newContent.text === 'string' ? newContent.text.split('\n').map(s => s.trim()).filter(Boolean) : []);
-            setCanvasItems(items => items.map(it => {
-                if (it.id === itemId) {
-                    const updated = { ...it, data: bullets.length > 0 ? bullets : it.data };
-                    // Apply charts if present
-                    if (Array.isArray(newContent.charts) && newContent.charts.length > 0) {
-                        // Normalize chart structure to arrays
-                        updated.charts = (newContent.charts || []).map(c => c.type || c.title || 'Chart');
-                        // Attach chartData if provided
-                        updated.chartData = (newContent.charts || []).reduce((acc, c, idx) => {
-                            try {
-                                const key = c.type || c.title || `Chart ${idx+1}`;
-                                acc[key] = c.data || [];
-                            } catch (e) {}
-                            return acc;
-                        }, { ...it.chartData });
-                    }
-                    // Apply frameworks if present
-                    if (Array.isArray(newContent.frameworks) && newContent.frameworks.length > 0) {
-                        updated.frameworks = (newContent.frameworks || []).map(f => f.name || f);
-                        // include framework data if provided
-                        updated.frameworkData = (newContent.frameworks || []).reduce((acc, f) => {
-                            try {
-                                if (typeof f === 'object' && f.name) acc[f.name] = f.data || {};
-                            } catch (e) {}
-                            return acc;
-                        }, { ...it.frameworkData });
-                    }
-                    return updated;
-                }
-                return it;
-            }));
-        } else {
-            const parsed = String(newContent || '').split('\n').map(s => s.trim()).filter(Boolean);
-            const final = parsed.length > 1 ? parsed : (parsed[0] || newContent);
-            setCanvasItems(items => items.map(it => it.id === itemId ? { ...it, data: final } : it));
-        }
+        const parsed = newContent.split('\n').map(s => s.trim()).filter(Boolean);
+        const final = parsed.length > 1 ? parsed : (parsed[0] || newContent);
+        setCanvasItems(items => items.map(it => it.id === itemId ? { ...it, data: final } : it));
         setEnrichModal({ open: false, itemId: null, initialContent: '' });
     };
 
@@ -692,20 +513,6 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                             <option value={4}>4px</option>
                             <option value={5}>5px</option>
                         </select>
-
-                        <span className="text-xs font-medium text-gray-700">Font:</span>
-                        <select
-                            value={fontScale}
-                            onChange={(e) => setFontScale(Number(e.target.value))}
-                            className="text-sm border-none bg-transparent outline-none cursor-pointer"
-                            title="Adjust font size"
-                        >
-                            <option value={0.85}>Small</option>
-                            <option value={0.95}>Narrow</option>
-                            <option value={1}>Normal</option>
-                            <option value={1.15}>Large</option>
-                            <option value={1.3}>XL</option>
-                        </select>
                     </div>
 
                     {/* Background Color Picker */}
@@ -714,7 +521,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                             onClick={() => setShowColorPicker(!showColorPicker)}
                             className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition"
                         >
-                            <div style={{ width: 20, height: 20, background: canvasBackgroundColor, borderRadius: 4, border: '1px solid #fffcfcff' }} />
+                            <div style={{ width: 20, height: 20, background: canvasBackgroundColor, borderRadius: 4, border: '1px solid #ccc' }} />
                             <span className="text-xs font-medium text-gray-700">Background</span>
                         </button>
 
@@ -728,7 +535,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                                     className="w-full h-10 cursor-pointer"
                                 />
                                 <div className="mt-2 grid grid-cols-4 gap-2">
-                                    {['#ffffffff', '#f5f5f4', '#e5e7eb', '#d1fae5', '#dbeafe', '#fef3c7', '#fce7f3', '#e0e7ff'].map(color => (
+                                    {['#ffffff', '#f5f5f4', '#e5e7eb', '#d1fae5', '#dbeafe', '#fef3c7', '#fce7f3', '#e0e7ff'].map(color => (
                                         <button
                                             key={color}
                                             onClick={() => setCanvasBackgroundColor(color)}
@@ -789,17 +596,12 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                 style={{
                     width: isFullScreen ? "100vw" : "100%",
                     maxWidth: isFullScreen ? "none" : `${CANVAS_WIDTH}px`,
-                    // When fullscreen, reduce canvas height so the bottom toolbar remains visible
-                    height: isFullScreen ? `calc(100vh - ${TOOLBAR_HEIGHT}px)` : `${CANVAS_HEIGHT}px`,
-                    minHeight: `${ACTIVE_CANVAS_HEIGHT}px`,
-                    // Add bottom padding in fullscreen to avoid content being obscured by the toolbar
-                    paddingBottom: isFullScreen ? `${TOOLBAR_HEIGHT}px` : undefined,
+                    height: isFullScreen ? "100vh" : `${CANVAS_HEIGHT}px`,
                     background: canvasBackgroundColor,
                     position: isFullScreen ? "fixed" : "relative",
                     top: isFullScreen ? 0 : undefined,
                     left: isFullScreen ? 0 : undefined,
-                    // Allow scrolling within the canvas in fullscreen if content overflows
-                    overflow: isFullScreen ? "auto" : "hidden",
+                    overflow: "hidden",
                     border: "1px solid #d6d3d1",
                     borderRadius: isFullScreen ? 0 : "8px 8px 0 0",
                     zIndex: isFullScreen ? 9999 : undefined,
@@ -811,21 +613,16 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                 {canvasItems.map((item, idx) => (
                     <Draggable
                         key={item.id}
-                        bounds={{
-                            left: PADDING,
-                            top: PADDING,
-                            right: ACTIVE_CANVAS_WIDTH - item.width - PADDING,
-                            bottom: ACTIVE_CANVAS_HEIGHT - item.height - PADDING
-                        }}
+                        bounds="parent"
                         position={{ x: item.x || 0, y: item.y || 0 }}
                         onDrag={(e, data) => handleDrag(e, data, item.id)}
                         onStart={() => bringToFront(item.id)}
                     >
                         <div
-                style={{
-                    position: "absolute",
-                    width: Math.min(item.width, ACTIVE_CANVAS_WIDTH - item.x - PADDING),
-                                height: Math.min(item.height, ACTIVE_CANVAS_HEIGHT - item.y - PADDING),
+                            style={{
+                                position: "absolute",
+                                width: item.width,
+                                height: item.height,
                                 background: "#ffffff",
                                 border: `${borderWidth}px dashed ${CARD_PALETTE[idx % CARD_PALETTE.length].accent}`,
                                 borderRadius: 12,
@@ -836,8 +633,6 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                                 cursor: "move",
                                 zIndex: item.zIndex || 0,
                                 boxSizing: "border-box",
-                                maxWidth: `${ACTIVE_CANVAS_WIDTH - item.x - PADDING}px`,
-                                maxHeight: `${ACTIVE_CANVAS_HEIGHT - item.y - PADDING}px`,
                             }}
                             className="group"
                         >
@@ -846,17 +641,6 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                                 {item.type === "custom" && Array.isArray(item.data) && (
                                     <button className="text-xs text-green-700 bg-white px-2 py-1 rounded shadow hover:bg-green-50" onClick={() => addListItem(item.id)} title="Add point">+</button>
                                 )}
-                                                                <div className="relative">
-                                                                    <button className="text-xs text-yellow-700 bg-white px-2 py-1 rounded shadow hover:bg-yellow-50" onClick={() => {
-                                                                            const initial = Array.isArray(item.data) ? item.data.join('\n') : String(item.data || '');
-                                                                            setEnrichModal({ open: true, itemId: item.id, initialContent: initial });
-                                                                    }} title="Enrich section">Enrich content</button>
-                                                                    {tooltipVisible && (
-                                                                        <div className="absolute -top-8 right-0 bg-yellow-100 border border-yellow-300 text-yellow-900 text-xs px-2 py-1 rounded shadow" style={{ whiteSpace: 'nowrap', zIndex: 40 }}>
-                                                                            Try "Enrich content" to auto-generate bullets, charts, or frameworks for this section
-                                                                        </div>
-                                                                    )}
-                                                                </div>
                                 <button className="text-xs text-blue-700 bg-white px-2 py-1 rounded shadow hover:bg-blue-50" onClick={() => bringToFront(item.id)} title="Bring to front">↑</button>
                                 <button className="text-xs text-blue-700 bg-white px-2 py-1 rounded shadow hover:bg-blue-50" onClick={() => sendToBack(item.id)} title="Send to back">↓</button>
                                 <button className="text-xs text-red-600 bg-white px-2 py-1 rounded shadow hover:bg-red-50" onClick={() => handleDelete(item.id)}>🗑</button>
@@ -876,11 +660,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                             )}
 
                             {/* Content Area */}
-                            <div className="flex-1 overflow-auto p-4" style={{ 
-                                fontSize: `${fontScale}em`,
-                                maxHeight: `${item.height - 60}px`, // Account for padding and title
-                                boxSizing: 'border-box'
-                            }}>
+                            <div className="flex-1 overflow-auto p-4" style={{ fontSize: '0.875rem' }}>
                                 {/* Editable Title - PowerPoint style */}
                                 <h4
                                     contentEditable={true}
@@ -894,7 +674,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                                     }}
                                     className="font-bold mb-2 uppercase tracking-wide outline-none focus:ring-2 focus:ring-blue-300 rounded px-1"
                                     style={{
-                                        fontSize: `${0.95}em`,
+                                        fontSize: '0.95rem',
                                         lineHeight: '1.3',
                                         color: CARD_PALETTE[idx % CARD_PALETTE.length].accent
                                     }}
@@ -944,8 +724,8 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
 
                                                     return (
                                                         <div key={fwidx} className="mb-2" style={{ maxHeight: item.height - 100 }}>
-                                                            <div className="font-semibold mb-1 text-gray-700" style={{ fontSize: `${0.7}em` }}>{fw}</div>
-                                                            <div style={{ fontSize: `${0.7}em` }}>
+                                                            <div className="font-semibold mb-1 text-gray-700" style={{ fontSize: '0.7rem' }}>{fw}</div>
+                                                            <div style={{ fontSize: '0.7rem' }}>
                                                                 <FrameworkDiagram
                                                                     framework={fw}
                                                                     frameworkData={fwData}
@@ -963,7 +743,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                                             <ul className="list-none ml-0 flex-1 overflow-auto">
                                                 {Array.isArray(item.data) && item.data.map((point, i) => (
                                                     <li key={i} className="text-gray-800 mb-2 pl-3 group/item relative" style={{
-                                                        fontSize: `${0.8}em`,
+                                                        fontSize: '0.8rem',
                                                         lineHeight: '1.4',
                                                         borderLeft: `4px solid ${CARD_PALETTE[i % CARD_PALETTE.length].accent}`,
                                                         paddingLeft: '0.75rem'
@@ -987,23 +767,23 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                                         {item.type === "takeaway" && (
                                             <div className="flex flex-col gap-2 h-full overflow-auto">
                                                 <div className="p-2 overflow-auto" style={{ borderLeft: `4px solid ${CARD_PALETTE[0].accent}` }}>
-                                                    <h5 className="font-semibold uppercase tracking-wide mb-1" style={{ color: CARD_PALETTE[0].accent, fontSize: `${0.65}em` }}>Key Insight</h5>
+                                                    <h5 className="font-semibold uppercase tracking-wide mb-1" style={{ color: CARD_PALETTE[0].accent, fontSize: '0.65rem' }}>Key Insight</h5>
                                                     <p
                                                         contentEditable={true}
                                                         suppressContentEditableWarning={true}
                                                         onBlur={(e) => handleContentEdit(item.id, 'takeaway', e.target.textContent)}
                                                         className="text-gray-800 outline-none focus:ring-2 focus:ring-blue-300 rounded px-1"
-                                                        style={{ fontSize: `${0.75}em`, lineHeight: '1.4' }}
+                                                        style={{ fontSize: '0.75rem', lineHeight: '1.4' }}
                                                     >{item.data?.takeaway || ''}</p>
                                                 </div>
                                                 <div className="p-2 overflow-auto" style={{ borderLeft: `4px solid ${CARD_PALETTE[1].accent}` }}>
-                                                    <h5 className="font-semibold uppercase tracking-wide mb-1" style={{ color: CARD_PALETTE[1].accent, fontSize: `${0.65}em` }}>Next Steps</h5>
+                                                    <h5 className="font-semibold uppercase tracking-wide mb-1" style={{ color: CARD_PALETTE[1].accent, fontSize: '0.65rem' }}>Next Steps</h5>
                                                     <p
                                                         contentEditable={true}
                                                         suppressContentEditableWarning={true}
                                                         onBlur={(e) => handleContentEdit(item.id, 'call_to_action', e.target.textContent)}
                                                         className="text-gray-800 outline-none focus:ring-2 focus:ring-blue-300 rounded px-1"
-                                                        style={{ fontSize: `${0.75}em`, lineHeight: '1.4' }}
+                                                        style={{ fontSize: '0.75rem', lineHeight: '1.4' }}
                                                     >{item.data?.call_to_action || ''}</p>
                                                 </div>
                                             </div>
@@ -1022,7 +802,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                                                                 chartDataObj = item.chartData[chartType] || item.chartData;
                                                             }
                                                             return (
-                                                                <div key={cidx} className="mb-2" style={{ fontSize: `${0.7}em` }}>
+                                                                <div key={cidx} className="mb-2" style={{ fontSize: '0.7rem' }}>
                                                                     <ChartRenderer
                                                                         type={chartType}
                                                                         data={chartDataObj}
@@ -1052,8 +832,8 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
 
                                                             return (
                                                                 <div key={fwidx} className="mb-2">
-                                                                    <div className="font-semibold mb-1 text-gray-700" style={{ fontSize: `${0.7}em` }}>{fw}</div>
-                                                                    <div style={{ fontSize: `${0.7}em` }}>
+                                                                    <div className="font-semibold mb-1 text-gray-700" style={{ fontSize: '0.7rem' }}>{fw}</div>
+                                                                    <div style={{ fontSize: '0.7rem' }}>
                                                                         <FrameworkDiagram
                                                                             framework={fw}
                                                                             frameworkData={fwData}
@@ -1068,7 +848,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
 
                                                 {/* Render Text Content */}
                                                 {item.data && (
-                                                    <div className="text-gray-800" style={{ fontSize: `${0.8}em`, lineHeight: '1.4' }}>
+                                                    <div className="text-gray-800" style={{ fontSize: '0.8rem', lineHeight: '1.4' }}>
                                                         {Array.isArray(item.data) ? (
                                                             <ul className="list-none ml-0">
                                                                 {item.data.map((point, i) => (
@@ -1095,7 +875,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                                                                 suppressContentEditableWarning={true}
                                                                 onBlur={(e) => handleContentEdit(item.id, 'data', e.target.textContent)}
                                                                 className="whitespace-pre-line outline-none focus:ring-2 focus:ring-blue-300 rounded px-1"
-                                                                style={{ fontSize: `${0.8}em`, lineHeight: '1.4' }}
+                                                                style={{ fontSize: '0.8rem', lineHeight: '1.4' }}
                                                             >{String(item.data || '')}</p>
                                                         )}
                                                     </div>
@@ -1121,19 +901,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
             </div>
 
             {/* Bottom Toolbar */}
-            <div
-                className="w-full bg-black flex items-center justify-between px-4"
-                style={{
-                    height: `${TOOLBAR_HEIGHT}px`,
-                    lineHeight: `${TOOLBAR_HEIGHT}px`,
-                    borderRadius: isFullScreen ? '0' : '0 0 12px 12px',
-                    position: isFullScreen ? 'fixed' : 'relative',
-                    bottom: isFullScreen ? 0 : undefined,
-                    left: isFullScreen ? 0 : undefined,
-                    width: isFullScreen ? '100vw' : '100%',
-                    zIndex: isFullScreen ? 10000 : undefined,
-                }}
-            >
+            <div className="w-full bg-black flex items-center justify-between py-3 px-4" style={{ borderRadius: '0 0 12px 12px' }}>
                 <div className="flex items-center space-x-2">
                     <button
                         className="text-white bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded flex items-center gap-2 shadow transition"
@@ -1196,18 +964,15 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                     <button
                         className="text-white bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded flex items-center gap-2 shadow transition"
                         onClick={() => setIsFullScreen(fs => !fs)}
-                        title={isFullScreen ? 'Minimize' : 'Full Screen'}
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             {isFullScreen ? (
-                                // Show a minimize/restore icon when in fullscreen
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18V6h12v12H6z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
                             ) : (
-                                // Show fullscreen enter icon when not fullscreen
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
                             )}
                         </svg>
-                        <span className="text-sm">{isFullScreen ? "Minimize" : "Full Screen"}</span>
+                        <span className="text-sm">{isFullScreen ? "Exit Fullscreen" : "Fullscreen"}</span>
                     </button>
                 </div>
             </div>
@@ -1216,36 +981,7 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                 open={enrichModal.open}
                 initialContent={enrichModal.initialContent}
                 onClose={() => setEnrichModal({ open: false, itemId: null, initialContent: '' })}
-                userCoins={userCoins}
-                onDone={async (content) => {
-                    try {
-                        // Apply the enriched content locally first
-                        applyEnrichedContent(enrichModal.itemId, content);
-
-                        // Consume half a coin for enrichment by calling backend
-                        if (token) {
-                            const res = await fetch(`${process.env.REACT_APP_API_BASE_URL || ''}/auth/consume_coin`, {
-                                method: 'POST',
-                                headers: {
-                                    'Authorization': `Bearer ${token}`,
-                                    'Content-Type': 'application/json',
-                                },
-                                body: JSON.stringify({ num_slides: 0.5 })
-                            });
-                            if (res.ok) {
-                                const data = await res.json();
-                                if (typeof setUserCoins === 'function') setUserCoins(data.coins);
-                            } else {
-                                const err = await res.json().catch(() => ({}));
-                                alert(err.detail || 'Failed to consume coin for enrichment');
-                            }
-                        }
-                    } catch (err) {
-                        console.error('Enrichment completed but coin consumption failed', err);
-                    } finally {
-                        setEnrichModal({ open: false, itemId: null, initialContent: '' });
-                    }
-                }}
+                onDone={(content) => applyEnrichedContent(enrichModal.itemId, content)}
             />
         </>
     );

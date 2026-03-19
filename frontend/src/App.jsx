@@ -464,7 +464,6 @@ function App() {
   const [userName, setUserName] = useState("User");
   const [userCoins, setUserCoins] = useState(0);
   const [currentSavedDeckId, setCurrentSavedDeckId] = useState(null);
-  const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false);
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [showEnrichTooltip, setShowEnrichTooltip] = useState(false);
 
@@ -984,14 +983,6 @@ function App() {
                       token={token}
                       setUserCoins={setUserCoins}
                       userCoins={userCoins}
-                      showEnrichTooltip={showEnrichTooltip}
-                      onEdit={() => {
-                        if (!hasUnsavedEdits) {
-                          setHasUnsavedEdits(true);
-                          // floating reminder to save edits
-                          showEnrichTip('You have unsaved edits — click "Save Deck" to save your changes.');
-                        }
-                      }}
                       />
                     </div>
                   </div>

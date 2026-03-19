@@ -159,7 +159,25 @@ const LoginSignup = () => {
                 width: '100%',
                 padding: '0',
               }}
-            />
+            >
+              {/* Fallback visible button so users see Google sign-in on page load.
+                  When Google Identity Services loads it will render into this container
+                  and replace the fallback button. */}
+              <button
+                type="button"
+                className="w-full max-w-sm flex items-center gap-3 justify-center border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-50"
+                aria-label="Sign in with Google"
+              >
+                {/* Inline Google 'G' icon */}
+                <svg width="18" height="18" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.4H272v95.4h146.9c-6.4 34.8-25.3 64.3-54 84.1v69.8h87.2c51-46.9 80.4-116.2 80.4-198.9z" fill="#4285F4"/>
+                  <path d="M272 544.3c73.5 0 135.4-24.5 180.6-66.6l-87.2-69.8c-24.2 16.2-55.4 25.8-93.4 25.8-71.7 0-132.5-48.4-154.2-113.4H25.1v71.2C70.1 487 164.3 544.3 272 544.3z" fill="#34A853"/>
+                  <path d="M117.8 330.3c-10.7-31.2-10.7-64.6 0-95.8V163.3H25.1c-44.9 89.9-44.9 196.3 0 286.2l92.7-119.2z" fill="#FBBC05"/>
+                  <path d="M272 107.6c39.9 0 75.8 13.7 104 40.6l78-78C407.6 23.6 349.6 0 272 0 164.3 0 70.1 57.3 25.1 144.5l92.7 71.1C139.5 156 200.3 107.6 272 107.6z" fill="#EA4335"/>
+                </svg>
+                <span className="text-sm font-medium">Sign in with Google</span>
+              </button>
+            </div>
             {!process.env.REACT_APP_GOOGLE_CLIENT_ID && (
               <p className="text-sm text-yellow-600 mt-2 text-center">Google Sign-In is not configured. Please set <code>REACT_APP_GOOGLE_CLIENT_ID</code> in <code>frontend/.env</code>.</p>
             )}

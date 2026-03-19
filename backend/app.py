@@ -179,6 +179,9 @@ async def enrich_section(payload: dict):
             cleaned = [str(x).strip() for x in parsed if str(x).strip()]
             return {"bullets": cleaned[:num]}
 
+
+        
+
         # If parsed is an object, extract fields
         if isinstance(parsed, dict):
             bullets = []
@@ -260,6 +263,112 @@ async def enrich_section(payload: dict):
         return {"bullets": cleaned[:num]}
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.post('/suggest_infographics')
+async def suggest_infographics(payload: dict):
+    """Accepts { title?: str, content: str } and returns a JSON array of recommended infographic names (subset of INFOGRAPHIC_REPO)."""
+    title = payload.get('title', '')
+    content = payload.get('content', '')
+    if not content:
+        return {"error": "content is required"}
+
+    try:
+        # Ask for structured suggestions: allow the model to return objects with name and optional data
+        infographics_prompt = f"""
+        Given the following section content, suggest the most relevant infographic types from this list.
+        For each suggested infographic return an object with 'name' (matching one of the repo names) and optional 'data' field with sample data required to render it.
+        Example response: [{'{"name": "SWOT Matrix", "data": {"strengths": [...], ...}}', '{"name": "Treemap", "data": {"segments": [{"name":"A","value":40}, ...]}}'}]
+        Valid infographic names: {json.dumps([i['name'] for i in INFOGRAPHIC_REPO])}
+        Section Title: {title}
+        Section Content: {content}
+        Return ONLY a JSON array of objects. Each object must include a 'name' key. 'data' is optional but preferred when possible.
+        """
+        inf_completion = openai_client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": "You are a consulting infographics expert. Return only valid JSON array of objects with 'name' and optional 'data'."},
+                {"role": "user", "content": infographics_prompt},
+            ],
+            temperature=0.2,
+        )
+        inf_content = inf_completion.choices[0].message.content
+        # try to parse (repair if needed)
+        try:
+            from json_repair import repair_json as _repair
+            inf_repaired = _repair(inf_content)
+            parsed = json.loads(inf_repaired)
+        except Exception:
+            try:
+                m = re.search(r'(\[.*\])', inf_content, re.DOTALL)
+                parsed = json.loads(m.group(1)) if m else json.loads(inf_content)
+            except Exception:
+                parsed = []
+
+        # Normalize to objects: allow strings or objects
+        suggestions = []
+        valid_names = {i['name'] for i in INFOGRAPHIC_REPO}
+        for p in (parsed or []):
+            try:
+                if isinstance(p, str):
+                    if p in valid_names:
+                        suggestions.append({'name': p, 'data': None})
+                elif isinstance(p, dict):
+                    name = p.get('name') or p.get('title')
+                    if name and name in valid_names:
+                        suggestions.append({'name': name, 'data': p.get('data')})
+            except Exception:
+                continue
+
+        # For any suggestion missing data, synthesize where feasible from content or generate dummy data
+        for s in suggestions:
+            if s.get('data'):
+                continue
+            try:
+                n = s['name'].lower()
+                # Chart-like visuals -> use generate_dummy_data
+                if any(k in n for k in ['chart', 'bar', 'line', 'pie', 'waterfall', 'gantt', 'radar', 'heatmap']):
+                    # choose a canonical chart type
+                    ctype = 'Bar Chart'
+                    if 'waterfall' in n:
+                        ctype = 'Waterfall Chart'
+                    elif 'gantt' in n:
+                        ctype = 'Gantt Chart'
+                    elif 'pie' in n or 'donut' in n:
+                        ctype = 'Pie Chart'
+                    elif 'line' in n:
+                        ctype = 'Line Chart'
+                    s['data'] = generate_dummy_data(ctype, content)
+                elif 'treemap' in n or 'market map' in n or 'tree map' in n:
+                    s['data'] = {'segments': [{'name': 'A', 'value': 50}, {'name': 'B', 'value': 30}, {'name': 'C', 'value': 20}]}
+                elif 'swot' in n:
+                    # try to extract bullets from content heuristically
+                    bullets = re.split(r'[\n\.;]\s*', content)[:4]
+                    s['data'] = {'strengths': [bullets[0]] if bullets else ['—'], 'weaknesses': [bullets[1]] if len(bullets)>1 else ['—'], 'opportunities': [bullets[2]] if len(bullets)>2 else ['—'], 'threats': [bullets[3]] if len(bullets)>3 else ['—']}
+                elif 'venn' in n or 'ecosystem' in n:
+                    s['data'] = {'sets': ['A','B']}
+                elif 'fishbone' in n or 'ishikawa' in n:
+                    s['data'] = {'causes': re.split(r'[\n\.;]\s*', content)[:4]}
+                elif 'gauge' in n or 'speedometer' in n:
+                    # attempt to pull a KPI number from content
+                    m = re.search(r"(\d{1,3}(?:\.\d+)?%?)", content)
+                    val = None
+                    if m:
+                        try:
+                            val = float(str(m.group(1)).replace('%',''))
+                        except Exception:
+                            val = None
+                    s['data'] = {'value': int(val) if val is not None else 55}
+                else:
+                    # generic fallback: provide small sample items
+                    s['data'] = {'items': re.split(r'[\n\.;]\s*', content)[:3]}
+            except Exception:
+                s['data'] = None
+
+        return suggestions
+    except Exception as e:
+        print('suggest_infographics error:', e)
+        return []
 
 # MongoDB decks collection
 MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://lobrockyl:Moyyn123@consultdg.ocafbf0.mongodb.net/?retryWrites=true&w=majority&appName=ConsultDG")
@@ -819,6 +928,98 @@ async def generate_slides(request: SlideRequest, authorization: str = Header(Non
 
         # Assign back
         s["sections"] = new_sections
+        # --- Suggest infographics for each section using INFOGRAPHIC_REPO if not provided ---
+        for section in s.get('sections', []):
+            try:
+                # Skip if already provided
+                if section.get('infographics'):
+                    continue
+                # Ask for structured suggestions (name and optional data)
+                infographics_prompt = f"""
+                Given the following section content, suggest the most relevant infographic types from this list.
+                For each suggested infographic return an object with 'name' (matching one of the repo names) and optional 'data' field with sample data required to render it.
+                Valid infographic names: {json.dumps([i['name'] for i in INFOGRAPHIC_REPO])}
+                Slide Title: {s.get('title')}
+                Section Title: {section.get('title')}
+                Section Content: {section.get('content')}
+                Return ONLY a JSON array of objects. Each object must include a 'name' key. 'data' is optional but preferred when possible.
+                """
+                inf_completion = openai_client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=[
+                        {"role": "system", "content": "You are a consulting infographics expert. Return only valid JSON array of objects with 'name' and optional 'data'."},
+                        {"role": "user", "content": infographics_prompt},
+                    ],
+                    temperature=0.2,
+                )
+                inf_content = inf_completion.choices[0].message.content
+                try:
+                    from json_repair import repair_json as _repair
+                    inf_repaired = _repair(inf_content)
+                    parsed = json.loads(inf_repaired)
+                except Exception:
+                    try:
+                        m = re.search(r'(\[.*\])', inf_content, re.DOTALL)
+                        parsed = json.loads(m.group(1)) if m else json.loads(inf_content)
+                    except Exception:
+                        parsed = []
+
+                suggestions = []
+                valid_names = {i['name'] for i in INFOGRAPHIC_REPO}
+                for p in (parsed or []):
+                    try:
+                        if isinstance(p, str) and p in valid_names:
+                            suggestions.append({'name': p, 'data': None})
+                        elif isinstance(p, dict):
+                            name = p.get('name') or p.get('title')
+                            if name and name in valid_names:
+                                suggestions.append({'name': name, 'data': p.get('data')})
+                    except Exception:
+                        continue
+
+                # Synthesize data for suggestions that lack it (use generate_dummy_data and heuristics)
+                for sg in suggestions:
+                    if sg.get('data'):
+                        continue
+                    try:
+                        n = sg['name'].lower()
+                        if any(k in n for k in ['chart', 'bar', 'line', 'pie', 'waterfall', 'gantt', 'radar', 'heatmap']):
+                            ctype = 'Bar Chart'
+                            if 'waterfall' in n:
+                                ctype = 'Waterfall Chart'
+                            elif 'gantt' in n:
+                                ctype = 'Gantt Chart'
+                            elif 'pie' in n or 'donut' in n:
+                                ctype = 'Pie Chart'
+                            elif 'line' in n:
+                                ctype = 'Line Chart'
+                            sg['data'] = generate_dummy_data(ctype, section.get('content') or '')
+                        elif 'treemap' in n or 'market map' in n or 'tree map' in n:
+                            sg['data'] = {'segments': [{'name': 'A', 'value': 50}, {'name': 'B', 'value': 30}, {'name': 'C', 'value': 20}]}
+                        elif 'swot' in n:
+                            bullets = re.split(r'[\n\.;]\s*', str(section.get('content') or ''))[:4]
+                            sg['data'] = {'strengths': [bullets[0]] if bullets else ['—'], 'weaknesses': [bullets[1]] if len(bullets)>1 else ['—'], 'opportunities': [bullets[2]] if len(bullets)>2 else ['—'], 'threats': [bullets[3]] if len(bullets)>3 else ['—']}
+                        elif 'venn' in n or 'ecosystem' in n:
+                            sg['data'] = {'sets': ['A','B']}
+                        elif 'fishbone' in n or 'ishikawa' in n:
+                            sg['data'] = {'causes': re.split(r'[\n\.;]\s*', str(section.get('content') or ''))[:4]}
+                        elif 'gauge' in n or 'speedometer' in n:
+                            m = re.search(r"(\d{1,3}(?:\.\d+)?%?)", str(section.get('content') or ''))
+                            val = None
+                            if m:
+                                try:
+                                    val = float(str(m.group(1)).replace('%',''))
+                                except Exception:
+                                    val = None
+                            sg['data'] = {'value': int(val) if val is not None else 55}
+                        else:
+                            sg['data'] = {'items': re.split(r'[\n\.;]\s*', str(section.get('content') or ''))[:3]}
+                    except Exception:
+                        sg['data'] = None
+
+                section['infographics'] = suggestions
+            except Exception:
+                section['infographics'] = []
         # Slide-level frameworks enrichment (existing logic)
         # for fw in s.get("frameworks", []):
             # if c>=1:
