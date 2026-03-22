@@ -4,7 +4,7 @@ import { useState, useEffect, createContext, useContext } from "react";
 import SlideForm from "./components/SlideForm";
 import CanvasSlidePreview from "./components/CanvasSlidePreview";
 import ProblemEnrichModal from "./components/ProblemEnrichModal";
-import { generateSlides, API_BASE_URL, fetchSavedDecks, saveDeck } from "./api";
+import { generateSlides, generateSlidesMultiStepStream, API_BASE_URL, fetchSavedDecks, saveDeck } from "./api";
 import LoginSignup from "./components/LoginSignup";
 import HomePage from "./components/HomePage";
 import PricingPage from "./components/PricingPage";
@@ -608,7 +608,52 @@ function App() {
           return;
         }
          // Pass token or other user details if needed
-        const result = await generateSlides(payload, token);
+        const numSlides = payload.num_slides;
+        const result = await generateSlidesMultiStepStream(payload, token, (msg) => {
+          try {
+            if (!msg || typeof msg !== 'object') return;
+            if (msg.type === 'outline') {
+              setOptimizedStoryline(msg.payload?.optimized_storyline || []);
+              const titles = msg.payload?.optimized_storyline || [];
+              const placeholderSlides = titles.slice(0, numSlides).map((t, i) => ({
+                slide_number: i + 1,
+                title: t,
+                slide_archetype: 'Title-Content',
+                visualization: '',
+                frameworks: [],
+                layout: { rows: 2, columns: 2 },
+                sections: [
+                  { row: 1, col: 1, title: 'Loading', content: 'Loading details...', charts: [], frameworks: [], infographics: [] },
+                  { row: 1, col: 2, title: 'Loading', content: 'Loading details...', charts: [], frameworks: [], infographics: [] },
+                  { row: 2, col: 1, title: 'Loading', content: 'Loading details...', charts: [], frameworks: [], infographics: [] },
+                  { row: 2, col: 2, title: 'Loading', content: 'Loading details...', charts: [], frameworks: [], infographics: [] },
+                ],
+                content: [],
+                takeaway: '',
+                call_to_action: '',
+                executive_summary: '',
+                detailed_analysis: '',
+                methodology: '',
+                data: [],
+              }));
+              setSlides(placeholderSlides);
+            } else if (msg.type === 'deck_expanded') {
+              setSlides(msg.payload?.deck?.slides || []);
+              setCurrentSlideIndex(0);
+            } else if (msg.type === 'slide_update') {
+              const idx = msg.payload?.slide_index;
+              const slide = msg.payload?.slide;
+              if (typeof idx === 'number' && slide) {
+                setSlides((prev) => {
+                  const next = Array.isArray(prev) ? [...prev] : [];
+                  if (next.length < idx + 1) next.length = idx + 1;
+                  next[idx] = slide;
+                  return next;
+                });
+              }
+            }
+          } catch (e) {}
+        });
   setSlides(result.slides);
   setOptimizedStoryline(result.optimized_storyline || []);
   // show a short tooltip guide for enrich buttons

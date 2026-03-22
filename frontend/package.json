@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
+    "@emotion/react": "^11.13.3",
+    "@emotion/styled": "^11.13.0",
+    "@mantine/core": "^7.15.0",
+    "@mantine/hooks": "^7.15.0",
     "aos": "^2.3.4",
     "axios": "1.12.2",
     "chart.js": "^4.5.0",

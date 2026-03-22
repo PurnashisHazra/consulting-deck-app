@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -265,6 +266,111 @@ async def enrich_section(payload: dict):
         return {"error": str(e)}
 
 
+def _generate_framework_data_single_call(
+    framework_name: str,
+    *,
+    slide_title: str = "",
+    section_title: str = "",
+    section_content: str = "",
+    problem_statement: str = "",
+):
+    """Generate framework_data JSON for a single framework/context."""
+    fw = str(framework_name or "").strip()
+    if not fw:
+        return {}
+
+    system_msg = (
+        "You are a consulting frameworks expert. "
+        "Return ONLY valid JSON object (no markdown)."
+    )
+    prompt = f"""
+Framework: {fw}
+Slide Title: {slide_title}
+Section Title: {section_title}
+Section Content: {section_content}
+Problem Statement: {problem_statement}
+
+Task:
+- Produce framework data that can be rendered visually.
+- Prefer short arrays per key (2-5 bullets each), concise phrases.
+- Include only relevant keys for the framework.
+- Keep it factual and presentation-ready.
+
+Examples:
+- SWOT => {{"Strengths":[],"Weaknesses":[],"Opportunities":[],"Threats":[]}}
+- Porter's Five Forces => {{"Competitive Rivalry":[],"Supplier Power":[],"Buyer Power":[],"Threat of Substitution":[],"Threat of New Entry":[]}}
+- RACI => {{"columns":["Activity","Owner","Ops","Finance"],"rows":[{{"Activity":"...","Owner":"R","Ops":"A","Finance":"C"}}]}}
+
+Return JSON object only.
+"""
+    try:
+        completion = openai_client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+        )
+        txt = completion.choices[0].message.content
+        parsed = _parse_json_loose(txt)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception as e:
+        print("_generate_framework_data_single_call error:", e)
+    return {}
+
+
+def _frameworks_bundle(framework_name: str, framework_data):
+    """Return normalized bundled shape: frameworks: [{framework_name: framework_data}]"""
+    fw = str(framework_name or "").strip()
+    if not fw:
+        return []
+    return [{fw: sanitize_for_json(framework_data or {})}]
+
+
+@app.post('/generate_framework_data')
+async def generate_framework_data(payload: dict):
+    """
+    Generate framework_data for a single framework when section payload is missing/null.
+    Input:
+    {
+      "framework_name": str,
+      "slide_title": str?,
+      "section_title": str?,
+      "section_content": str|list|dict?,
+      "problem_statement": str?
+    }
+    """
+    framework_name = str(payload.get("framework_name") or "").strip()
+    if not framework_name:
+        return {"error": "framework_name is required"}
+
+    section_content = payload.get("section_content", "")
+    if isinstance(section_content, list):
+        section_content = "\n".join([str(x) for x in section_content if x is not None])
+    elif isinstance(section_content, dict):
+        section_content = json.dumps(sanitize_for_json(section_content), ensure_ascii=False)
+    else:
+        section_content = str(section_content or "")
+
+    data = _generate_framework_data_single_call(
+        framework_name,
+        slide_title=str(payload.get("slide_title") or ""),
+        section_title=str(payload.get("section_title") or ""),
+        section_content=section_content,
+        problem_statement=str(payload.get("problem_statement") or ""),
+    )
+    sanitized_data = sanitize_for_json(data or {})
+    return {
+        # New preferred format
+        "frameworks": _frameworks_bundle(framework_name, sanitized_data),
+        # Backward compatibility
+        "framework": framework_name,
+        "framework_data": sanitized_data,
+    }
+
+
 @app.post('/suggest_infographics')
 async def suggest_infographics(payload: dict):
     """Accepts { title?: str, content: str } and returns a JSON array of recommended infographic names (subset of INFOGRAPHIC_REPO)."""
@@ -400,6 +506,106 @@ class SlideRequest(BaseModel):
     table_data: Optional[dict] = None
     table_sources: Optional[List[dict]] = None
     deep_analysis: Optional[bool] = False
+    enhance_slides: Optional[bool] = True
+
+
+def _parse_json_loose(text: str):
+    if not isinstance(text, str):
+        return None
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+    try:
+        return json.loads(repair_json(text))
+    except Exception:
+        pass
+    try:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(text[start:end + 1])
+    except Exception:
+        pass
+    return None
+
+
+def _sse_ndjson_event(event_type: str, payload: dict):
+    return json.dumps({"type": event_type, "payload": payload}, ensure_ascii=False) + "\n"
+
+
+def enhance_slide_single_call(
+    *,
+    problem_statement: str,
+    storyline: List[str],
+    num_slides: int,
+    slide: dict,
+    repos_context: dict,
+    table_summaries: Optional[dict] = None,
+    financial_metrics: Optional[dict] = None,
+):
+    try:
+        slide_number = int(slide.get("slide_number") or 0) or None
+    except Exception:
+        slide_number = None
+
+    slide_repo_names = [s.get("name") for s in (repos_context or {}).get("SLIDE_REPO", []) if isinstance(s, dict) and s.get("name")]
+    chart_repo_names = [c.get("name") for c in (repos_context or {}).get("CHART_REPO", []) if isinstance(c, dict) and c.get("name")]
+    framework_names = [f.get("name") for f in (repos_context or {}).get("DATA_FRAMEWORKS", []) if isinstance(f, dict) and f.get("name")]
+
+    response_schema = {
+        "slide_number": "int (must match input)",
+        "title": "string",
+        "slide_archetype": "string",
+        "visualization": "string",
+        "frameworks": "array of framework names",
+        "layout": {"rows": "int", "columns": "int"},
+        "sections": [{"row": "int", "col": "int", "title": "string", "content": "string|array", "charts": "array", "frameworks": "array", "infographics": "array"}],
+        "takeaway": "string",
+        "call_to_action": "string",
+        "executive_summary": "string",
+        "data": "array",
+        "detailed_analysis": "string",
+        "methodology": "string",
+    }
+
+    system_instructions = """
+You are a senior consulting-slide designer and analyst.
+Enhance THIS ONE SLIDE only.
+Improve layout, fill missing content, and tighten executive insight.
+Return ONLY valid JSON and keep slide_number unchanged.
+"""
+    user_prompt = f"""
+Problem statement: {problem_statement}
+Storyline: {json.dumps(storyline, ensure_ascii=False)}
+Slide index: {slide_number} / {num_slides}
+Table summaries: {json.dumps(sanitize_for_json(table_summaries or {}), ensure_ascii=False)}
+Financial metrics: {json.dumps(sanitize_for_json(financial_metrics or {}), ensure_ascii=False)}
+Allowed slide archetypes: {json.dumps(slide_repo_names, ensure_ascii=False)}
+Allowed chart names: {json.dumps(chart_repo_names, ensure_ascii=False)}
+Allowed frameworks: {json.dumps(framework_names, ensure_ascii=False)}
+Input slide: {json.dumps(sanitize_for_json(slide), ensure_ascii=False)}
+Output schema: {json.dumps(response_schema, ensure_ascii=False)}
+"""
+    try:
+        completion = openai_client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": system_instructions},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.2,
+        )
+        enhanced = _parse_json_loose(completion.choices[0].message.content)
+        if isinstance(enhanced, dict):
+            if "slide" in enhanced and isinstance(enhanced["slide"], dict):
+                enhanced = enhanced["slide"]
+            if slide_number is not None:
+                enhanced["slide_number"] = slide_number
+            return enhanced
+    except Exception as e:
+        print("enhance_slide_single_call error:", e)
+    return None
 
 def generate_dummy_data(visualization: str, slide_content: str):
     """Generate realistic dummy data based on visualization type and content"""
@@ -593,7 +799,8 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
         "   - title: Section title "
         "   - content: Key points (minimize content) "
         "   - charts: an array of chart types (from CHART_REPO) relevant for this section"
-        "   - frameworks: an array of frameworks (from DATA_FRAMEWORKS) relevant for this section"
+        "   - chart_data: object keyed by chart name with labels/values/xAxisTitle/yAxisTitle/legend/inferences"
+        "   - frameworks: MUST be bundled with data in this format: [{\"Framework Name\": { ...framework_data... }}]"
         "Study BCG and McKinsey slide design patterns and suggest layouts and content sections that maximize clarity and impact for each section of each slide. "
         "Also, build an executive-ready consulting deck with detailed, comprehensive content. Expand the storyline into detailed, actionable insights. "
         "Use the provided repos to choose frameworks and chart types."
@@ -622,7 +829,9 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
                             "title": {"type": "string"},
                             "content": {"type": "string"},
                             "charts": {"type": "array", "items": {"type": "string"}},
-                            "frameworks": {"type": "array", "items": {"type": "string"}}
+                            "frameworks": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
+                            "chart_data": {"type": "object"},
+                            "framework_data": {"type": "object"}
                         }, "required": ["row", "col", "content"]}},
                         "visualization": {"type": "string"},
                         "frameworks": {"type": "array", "items": {"type": "string"}},
@@ -670,9 +879,9 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
     {json.dumps(response_schema, ensure_ascii=False)}
     - For each slide, provide slide_archetype, layout (rows/columns), and sections (row, col, content) as described above.
     - chart must be one of the chart names present in CHART_REPO and should be the most suitable one
-    - If chart is specified, compulsorily give relevant data with sources.
+    - If chart is specified, compulsorily provide section.chart_data[chart_name] with labels, values, xAxisTitle, yAxisTitle, legend, inferences, and sources where possible.
     - For forecasts, use realistic, justifiable numbers and give 5 year forecasts with CAGR and sources.
-    - frameworks must be chosen from DATA_FRAMEWORKS names and should be the most suitable one
+    - frameworks must be chosen from DATA_FRAMEWORKS names and returned as bundled objects only: [{{ "Framework Name": {{ ...framework_data... }} }}]
     - Content should have relevant data points, numbers, and sources.
     - Ensure slides length == num_slides and include slide_number 1..N
     - Create detailed, comprehensive content with 3-4 bullet points per slide
@@ -721,6 +930,48 @@ def generate_deck_single_call(problem_statement: str, storyline: List[str], num_
         result.setdefault('table_sources', table_sources or [])
         result.setdefault('table_summaries', sanitize_for_json(table_summaries))
         result.setdefault('financial_metrics', sanitize_for_json(financial_metrics))
+        # Normalize section visuals payloads so chart/framework data is always present in API response.
+        for sl in result.get("slides", []) or []:
+            for sec in sl.get("sections", []) or []:
+                charts = sec.get("charts") if isinstance(sec.get("charts"), list) else []
+                sec.setdefault("chart_data", {})
+                sec.setdefault("framework_data", {})
+
+                if isinstance(sec.get("chart_data"), dict):
+                    for ch in charts:
+                        if ch not in sec["chart_data"] or not isinstance(sec["chart_data"].get(ch), dict):
+                            sec["chart_data"][ch] = {
+                                "labels": [],
+                                "values": [],
+                                "xAxisTitle": "Not available",
+                                "yAxisTitle": "Not available",
+                                "legend": ch,
+                                "inferences": [],
+                            }
+
+                raw_fw = sec.get("frameworks", [])
+                bundled_fw = []
+                if isinstance(raw_fw, list):
+                    for fw_item in raw_fw:
+                        if isinstance(fw_item, str):
+                            fw_name = fw_item.strip()
+                            if not fw_name:
+                                continue
+                            fw_data = {}
+                            if isinstance(sec.get("framework_data"), dict):
+                                fw_data = sec["framework_data"].get(fw_name, {}) or {}
+                            bundled_fw.append({fw_name: fw_data})
+                        elif isinstance(fw_item, dict):
+                            for k, v in fw_item.items():
+                                if str(k).strip():
+                                    bundled_fw.append({str(k): v if isinstance(v, dict) else {}})
+                if bundled_fw:
+                    sec["frameworks"] = bundled_fw
+                    merged_fw = {}
+                    for b in bundled_fw:
+                        for k, v in b.items():
+                            merged_fw[str(k)] = v if isinstance(v, dict) else {}
+                    sec["framework_data"] = merged_fw
     except Exception:
         pass
     return result
@@ -805,6 +1056,11 @@ async def generate_slides(request: SlideRequest, authorization: str = Header(Non
         return {"error": "Authentication token is missing."}
     # Ensure slide numbers and count
     slides = result.get("slides", [])
+    repos_context = {
+        "CHART_REPO": CHART_REPO,
+        "DATA_FRAMEWORKS": DATA_FRAMEWORKS,
+        "SLIDE_REPO": SLIDE_REPO,
+    }
     for i, s in enumerate(slides):
         c=0
         s.setdefault("slide_number", i + 1)
@@ -1341,6 +1597,65 @@ async def generate_slides(request: SlideRequest, authorization: str = Header(Non
     result["slides"] = slides[: request.num_slides]
     result.setdefault("problem_statement", request.problem_statement)
     result.setdefault("optimized_storyline", result.get("optimized_storyline", request.storyline))
+
+    # Final Step 4: Per-slide layout zoning (one API call per slide).
+    if bool(getattr(request, "enhance_slides", True)):
+        try:
+            # Use the finalized visuals/content coming from the deterministic pipeline.
+            slides = result.get("slides", []) or []
+            for idx, slide in enumerate(slides):
+                patch = slide_layout_zoning_single_call(
+                    problem_statement=request.problem_statement,
+                    storyline=request.storyline,
+                    num_slides=request.num_slides,
+                    slide=slide,
+                )
+                if not isinstance(patch, dict):
+                    continue
+                # Apply zone overlay content
+                if patch.get("slide_design"):
+                    slide["slide_design"] = patch.get("slide_design")
+                if patch.get("zone_contents"):
+                    slide["zone_contents"] = patch.get("zone_contents")
+                if isinstance(patch.get("suggested_layouts"), list):
+                    slide["suggested_layouts"] = patch.get("suggested_layouts")
+
+                # Apply section placements without overwriting visuals fields
+                placements = patch.get("sections_layout") or []
+                sections = slide.get("sections", []) or []
+                for pl in placements:
+                    if not isinstance(pl, dict):
+                        continue
+                    i = pl.get("index")
+                    if i is None or not isinstance(i, int):
+                        continue
+                    if i < 0 or i >= len(sections):
+                        continue
+                    sec = sections[i]
+                    for k in ["x", "y", "w", "h", "zone", "hide_card_header", "hideCardHeader", "hide_card_header"]:
+                        pass
+                    if "x" in pl:
+                        sec["x"] = pl.get("x")
+                    if "y" in pl:
+                        sec["y"] = pl.get("y")
+                    if "w" in pl:
+                        sec["w"] = pl.get("w")
+                    if "h" in pl:
+                        sec["h"] = pl.get("h")
+                    if "zone" in pl:
+                        sec["zone"] = pl.get("zone")
+                    hide = pl.get("hide_card_header")
+                    if hide is None:
+                        hide = pl.get("hideCardHeader")
+                    if isinstance(hide, bool):
+                        sec["hideCardHeader"] = hide
+                    # Optional title/content updates
+                    if pl.get("title") is not None:
+                        sec["title"] = pl.get("title")
+                    if pl.get("content") is not None:
+                        sec["content"] = pl.get("content")
+        except Exception as e:
+            print("layout zoning pass failed:", e)
     # Save the generated deck into decks_collection and add a reference to user's saved_decks
     try:
         from auth import verify_access_token
@@ -1379,6 +1694,515 @@ async def generate_slides(request: SlideRequest, authorization: str = Header(Non
     except Exception:
         safe_result = result
     return safe_result
+
+
+def generate_outline_titles_single_call(problem_statement: str, num_slides: int, *, deep_analysis: bool = False) -> List[str]:
+    system_instructions = """
+You are a senior consulting story architect.
+Generate only slide titles in logical flow.
+Return ONLY valid JSON array of strings with exact length == num_slides.
+"""
+    user_prompt = f"""
+Problem statement:
+{problem_statement}
+
+num_slides: {num_slides}
+deep_analysis: {bool(deep_analysis)}
+"""
+    try:
+        completion = openai_client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "system", "content": system_instructions}, {"role": "user", "content": user_prompt}],
+            temperature=0.3,
+        )
+        parsed = _parse_json_loose(completion.choices[0].message.content)
+        if isinstance(parsed, list):
+            titles = [str(x).strip() for x in parsed if str(x).strip()]
+            while len(titles) < num_slides:
+                titles.append(f"Slide {len(titles)+1}")
+            return titles[:num_slides]
+    except Exception as e:
+        print("generate_outline_titles_single_call error:", e)
+    return [f"Slide {i+1}" for i in range(num_slides)]
+
+
+def slide_layout_zoning_single_call(
+    *,
+    problem_statement: str,
+    storyline: List[str],
+    num_slides: int,
+    slide: dict,
+) -> Optional[dict]:
+    """
+    Step 4: Layout zainer.
+
+    Output is ONLY layout/placement metadata:
+    - slide_design (zones coords for 16:9 canvas)
+    - zone_contents (text for header/footer/strip/side)
+    - sections_layout: per existing slide.sections[i] absolute placement (x/y/w/h) + optional title/content updates.
+
+    CRITICAL: Do not ask the model to regenerate charts/framework_data/infographics.
+    We will keep existing slide.sections[i] visuals and apply coordinates only.
+    """
+    slide_number = slide.get("slide_number")
+
+    def _tokenize_text(v: str) -> set:
+        try:
+            return {t for t in re.findall(r"[a-zA-Z0-9]+", str(v or "").lower()) if len(t) > 2}
+        except Exception:
+            return set()
+
+    def _select_layout_repo_candidates(slide_obj: dict, *, top_k: int = 18) -> List[dict]:
+        """Pick relevant SLIDE_REPO entries for this slide so prompt stays useful and compact."""
+        query_bits = [
+            problem_statement or "",
+            slide_obj.get("title") or "",
+            slide_obj.get("slide_archetype") or "",
+            slide_obj.get("visualization") or "",
+        ]
+        query_bits.extend(storyline or [])
+        for sec in (slide_obj.get("sections") or [])[:6]:
+            if not isinstance(sec, dict):
+                continue
+            query_bits.append(sec.get("title") or "")
+            c = sec.get("content")
+            if isinstance(c, list):
+                query_bits.extend([str(x) for x in c[:3]])
+            else:
+                query_bits.append(str(c or ""))
+            query_bits.extend(sec.get("charts") or [])
+            query_bits.extend(sec.get("frameworks") or [])
+
+        query_tokens = _tokenize_text(" ".join([str(x) for x in query_bits if x is not None]))
+        scored = []
+        for item in (SLIDE_REPO or []):
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name") or ""
+            use_cases = item.get("use_cases") or []
+            visuals = item.get("visuals") or []
+            layout = item.get("layout") or {}
+            sections_names = layout.get("sections") or []
+
+            item_tokens = set()
+            item_tokens |= _tokenize_text(name)
+            item_tokens |= _tokenize_text(" ".join([str(x) for x in use_cases]))
+            item_tokens |= _tokenize_text(" ".join([str(x) for x in visuals]))
+            item_tokens |= _tokenize_text(" ".join([str(x) for x in sections_names]))
+
+            overlap = len(query_tokens.intersection(item_tokens))
+            bonus = 0
+            slide_viz = str(slide_obj.get("visualization") or "").lower()
+            if slide_viz and any(slide_viz in str(v).lower() for v in visuals):
+                bonus += 2
+            score = overlap + bonus
+            scored.append((score, {
+                "name": name,
+                "use_cases": use_cases,
+                "layout": {
+                    "rows": layout.get("rows"),
+                    "columns": layout.get("columns"),
+                    "sections": sections_names,
+                },
+                "visuals": visuals,
+            }))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        picked = [x[1] for x in scored[:top_k] if x[0] > 0]
+        if not picked:
+            picked = [x[1] for x in scored[: min(top_k, 10)]]
+        return picked
+
+    layout_repo_candidates = _select_layout_repo_candidates(slide, top_k=18)
+
+    system_instructions = """
+You are a senior consulting deck art director.
+You will design a single PPT-like 16:9 slide using the provided base object concept.
+
+You MUST output ONLY JSON (no markdown) with keys:
+  - layout_id (string)
+  - suggested_layouts: array (max 3) of objects:
+      { "name": string (prefer from candidate layout repo), "reason": string }
+  - slide_design:
+      { "margin": {top,right,bottom,left}, "zones": { title, subtitle, body, footer, side?, insight_strip? } }
+    Each zone has: { "x": number, "y": number, "w": number, "h": number }
+  - zone_contents:
+      { "title": string, "subtitle": string|null, "footer": string, "side": string|null, "insight_strip": string|null }
+  - sections_layout:
+      array length == len(input_slide.sections)
+      each element:
+        { "index": i, "zone": string, "x": number, "y": number, "w": number, "h": number,
+          "hide_card_header": boolean|null,
+          "title": string|null,
+          "content": string|null }
+
+Absolute canvas coordinate system:
+- Entire slide canvas is 1280 x 720 (16:9)
+- Use the base margin style: left=40 right=40 top=40 bottom=30 by default
+
+Grid guidance (must align where possible):
+- Treat the inner content area (body width) as 12 columns across 1200px.
+- So columnWidth ~= 100px and columns start at x=40.
+- Align section x/w edges to multiples of 100px relative to x=40 when creating body/side layouts.
+
+Consulting design rules:
+- 1 dominant message
+- 1 dominant visual (charts/framework/infographic) if present in the sections
+- 3 to 5 supporting points max in text portions
+- Prefer layouts that place the dominant visual in the body zone and move text to side/footer/strip.
+
+Layout selection logic (choose layout_id)
+selection_rules:
+1) if "single quantitative insight with one chart" => use ["chart_01", "chart_02"]
+2) if "comparison across two entities or periods" => use ["text_03", "chart_03"]
+3) if "process or sequence needs explanation" => use ["text_06", "info_01", "info_02"]
+4) if "strategy with 3 to 4 pillars" => use ["text_04", "hybrid_02", "info_05"]
+5) if "market landscape plus data" => use ["hybrid_03", "info_03", "chart_04"]
+6) if "decision recommendation backed by evidence" => use ["hybrid_04", "text_02", "text_08"]
+7) if "dashboard review of KPIs" => use ["chart_06", "hybrid_05", "chart_07"]
+8) if "root cause or problem decomposition" => use ["text_07", "text_05"]
+If uncertain, select the closest rule based on keywords present in:
+- slide.visualization
+- section.charts/frameworks/infographics
+- slide title / storyline intent
+
+Aesthetic rules the AI should always obey
+spacing_rules_px:
+{
+  "outer_margin_px": 36,
+  "inner_gutter_px": 20,
+  "min_box_padding_px": 12,
+  "vertical_spacing_between_sections_px": 16,
+  "avoid_edge_crowding": true
+}
+text_rules:
+{
+  "title_max_lines": 2,
+  "title_max_words": 16,
+  "bullet_max_count": 5,
+  "bullet_max_words": 12,
+  "avoid_paragraphs": true,
+  "prefer_noun_phrases": true
+}
+visual_rules:
+{
+  "one_primary_focal_area": true,
+  "max_distinct_visual_elements": 5,
+  "prefer_alignment_to_grid": true,
+  "equal_box_heights_when_symmetric": true,
+  "no_decorative_shapes_without_information": true
+}
+color_rules:
+{
+  "base_palette_count": 3,
+  "one_accent_color": true,
+  "neutral_background": true,
+  "highlight_only_key_data": true,
+  "avoid_rainbow_charts": true
+}
+
+Best-practice metadata format for chosen layout_id (use this as reasoning guidance):
+{
+  "layout_id": "chart_01",
+  "name": "Hero chart with takeaway bullets",
+  "content_mode": "quantitative",
+  "visual_density": "medium",
+  "text_density": "low",
+  "best_for": ["trend insight"],
+  "avoid_when": ["more than one major insight"],
+  "regions": [
+    {
+      "name": "title",
+      "priority": 1,
+      "x_pct": 0.03,
+      "y_pct": 0.03,
+      "w_pct": 0.94,
+      "h_pct": 0.10
+    }
+  ]
+}
+
+Compatibility:
+- Do NOT modify slide.sections visual fields like charts/frameworks/infographics/chart_data/framework_data.
+- You are only returning geometry and text updates; those will be applied by code.
+
+layout_id:
+- Choose one of the following template ids when possible: text_01..text_08, chart_01..chart_07, info_01..info_07, hybrid_01..hybrid_05.
+- If none fit, return 'custom_layout'.
+"""
+
+    user_prompt = f"""
+PROBLEM STATEMENT:
+{problem_statement}
+
+STORYLINE:
+{json.dumps(storyline, ensure_ascii=False)}
+
+THIS SLIDE:
+- slide_number: {slide_number}
+- slide_title: {slide.get("title")}
+- slide_archetype: {slide.get("slide_archetype")}
+
+INPUT SLIDE (only visuals + text; you will not modify visuals):
+{json.dumps(sanitize_for_json(slide), ensure_ascii=False)}
+
+LAYOUT REPO CANDIDATES (ranked; use these to suggest best-fit layouts for this slide):
+{json.dumps(sanitize_for_json(layout_repo_candidates), ensure_ascii=False)}
+
+BASE object for zones (must respect):
+{{
+  "slide": {{
+    "margin": {{ "top": 40, "right": 40, "bottom": 30, "left": 40 }},
+    "zones": {{
+      "title": {{ "x": 40, "y": 20, "w": 1200, "h": 60 }},
+      "subtitle": {{ "x": 40, "y": 82, "w": 1200, "h": 28 }},
+      "body": {{ "x": 40, "y": 120, "w": 1200, "h": 560 }},
+      "footer": {{ "x": 40, "y": 690, "w": 1200, "h": 20 }}
+    }}
+  }}
+}}
+"""
+    try:
+        completion = openai_client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "system", "content": system_instructions}, {"role": "user", "content": user_prompt}],
+            temperature=0.2,
+        )
+        raw = completion.choices[0].message.content
+        enhanced = _parse_json_loose(raw)
+        if isinstance(enhanced, dict):
+            return enhanced
+    except Exception as e:
+        print("slide_layout_zoning_single_call error:", e)
+    return None
+
+
+def expand_slides_single_call(problem_statement: str, outline_titles: List[str], *, num_slides: int, data: Optional[dict], table_data: Optional[dict], table_sources: Optional[List[dict]], deep_analysis: bool) -> dict:
+    # Reuse robust existing one-call generator with storyline=outline titles
+    return generate_deck_single_call(
+        problem_statement,
+        outline_titles,
+        num_slides,
+        data,
+        table_data=table_data,
+        table_sources=table_sources,
+        deep_analysis=bool(deep_analysis),
+    )
+
+
+def normalize_chain_deck_for_frontend(deck: dict, num_slides: int) -> dict:
+    slides = deck.get("slides", []) if isinstance(deck, dict) else []
+    for i in range(min(num_slides, len(slides))):
+        s = slides[i]
+        if not isinstance(s, dict):
+            continue
+        s.setdefault("slide_number", i + 1)
+        s.setdefault("layout", {"rows": 2, "columns": 2})
+        s.setdefault("sections", [])
+        s.setdefault("content", [])
+        s.setdefault("frameworks", [])
+        s.setdefault("data", [])
+    deck["slides"] = slides[:num_slides]
+    deck.setdefault("optimized_storyline", deck.get("optimized_storyline") or [])
+    return deck
+
+
+def insight_enhancer_single_call(*, problem_statement: str, storyline: List[str], num_slides: int, slide: dict, deep_analysis: bool) -> Optional[dict]:
+    # Use existing per-slide enhancer
+    return enhance_slide_single_call(
+        problem_statement=problem_statement,
+        storyline=storyline,
+        num_slides=num_slides,
+        slide=slide,
+        repos_context={"CHART_REPO": CHART_REPO, "DATA_FRAMEWORKS": DATA_FRAMEWORKS, "SLIDE_REPO": SLIDE_REPO},
+        table_summaries=None,
+        financial_metrics=None,
+    )
+
+
+def visual_layer_single_call(*, problem_statement: str, storyline: List[str], num_slides: int, slide: dict, data: Optional[dict] = None, table_summaries: Optional[dict] = None) -> Optional[dict]:
+    # Reuse same enhancer; downstream section-level enrichment in /generate_slides handles visuals strongly
+    return enhance_slide_single_call(
+        problem_statement=problem_statement,
+        storyline=storyline,
+        num_slides=num_slides,
+        slide=slide,
+        repos_context={"CHART_REPO": CHART_REPO, "DATA_FRAMEWORKS": DATA_FRAMEWORKS, "SLIDE_REPO": SLIDE_REPO},
+        table_summaries=table_summaries,
+        financial_metrics=None,
+    )
+
+
+@app.post("/generate_slides_multi_step_stream")
+async def generate_slides_multi_step_stream(request: SlideRequest, authorization: str = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
+    token = authorization.split(" ")[1]
+
+    # validate token + coins
+    user_email = None
+    try:
+        from auth import verify_access_token, get_user
+        payload = verify_access_token(token)
+        user_email = payload.get("sub")
+        user_details = await get_user(token=token)
+        if user_details.get("coins", 0) < request.num_slides:
+            raise HTTPException(status_code=400, detail="Insufficient coins to generate slides.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+
+    def _merge_slide_preserve_section_assets(original_slide: dict, patch_slide: dict) -> dict:
+        """
+        We often merge enhancement results like {**slide, **enhanced}.
+        But enhancement calls can replace the whole `sections` array without including
+        `framework_data` / `chart_data` (which were generated in step2).
+        This helper preserves those per-section assets when patch sections omit them.
+        """
+        if not isinstance(original_slide, dict) or not isinstance(patch_slide, dict):
+            return original_slide
+
+        merged = {**original_slide, **patch_slide}
+
+        if "sections" not in patch_slide:
+            return merged
+
+        orig_sections = original_slide.get("sections", [])
+        patch_sections = patch_slide.get("sections", [])
+
+        if not isinstance(orig_sections, list) or not isinstance(patch_sections, list):
+            return merged
+
+        preserve_keys = {"framework_data", "chart_data", "infographics"}
+        merged_sections = []
+
+        for i in range(len(patch_sections)):
+            base_sec = orig_sections[i] if i < len(orig_sections) else {}
+            patch_sec = patch_sections[i] if isinstance(patch_sections[i], dict) else {}
+            if not isinstance(patch_sec, dict):
+                patch_sec = {}
+
+            sec = {**base_sec, **patch_sec}
+            for k in preserve_keys:
+                patch_val = patch_sec.get(k) if isinstance(patch_sec, dict) else None
+                patch_missing = k not in patch_sec
+                patch_empty = patch_val is None or patch_val == [] or patch_val == {} or patch_val == ""
+                if (patch_missing or patch_empty) and k in base_sec:
+                    sec[k] = base_sec[k]
+            merged_sections.append(sec)
+
+        # If patch returned fewer sections, keep the remaining original ones.
+        if len(patch_sections) < len(orig_sections):
+            for j in range(len(patch_sections), len(orig_sections)):
+                merged_sections.append(orig_sections[j])
+
+        merged["sections"] = merged_sections
+        return merged
+
+    async def event_gen():
+        try:
+            yield _sse_ndjson_event("status", {"stage": "step1_outline", "message": "Generating slide outline..."})
+            outline_titles = generate_outline_titles_single_call(request.problem_statement, request.num_slides, deep_analysis=bool(request.deep_analysis))
+            yield _sse_ndjson_event("outline", {"optimized_storyline": outline_titles})
+
+            yield _sse_ndjson_event("status", {"stage": "step2_expand", "message": "Expanding slides..."})
+            deck = expand_slides_single_call(
+                request.problem_statement,
+                outline_titles,
+                num_slides=request.num_slides,
+                data=request.data,
+                table_data=request.table_data,
+                table_sources=request.table_sources,
+                deep_analysis=bool(request.deep_analysis),
+            )
+            deck = normalize_chain_deck_for_frontend(deck, request.num_slides)
+            yield _sse_ndjson_event("deck_expanded", {"deck": deck})
+
+            for idx, slide in enumerate(deck.get("slides", [])):
+                yield _sse_ndjson_event("status", {"stage": "step3_insight_enhancer", "slide_index": idx, "message": "Enhancing insights..."})
+                enhanced = insight_enhancer_single_call(
+                    problem_statement=request.problem_statement,
+                    storyline=outline_titles,
+                    num_slides=request.num_slides,
+                    slide=slide,
+                    deep_analysis=bool(request.deep_analysis),
+                )
+                if isinstance(enhanced, dict):
+                    deck["slides"][idx] = _merge_slide_preserve_section_assets(slide, enhanced)
+                yield _sse_ndjson_event("slide_update", {"slide_index": idx, "stage": "insight_enhanced", "slide": deck["slides"][idx]})
+
+                yield _sse_ndjson_event("status", {"stage": "step4_visual_layer", "slide_index": idx, "message": "Adding visuals..."})
+                visualized = visual_layer_single_call(
+                    problem_statement=request.problem_statement,
+                    storyline=outline_titles,
+                    num_slides=request.num_slides,
+                    slide=deck["slides"][idx],
+                    data=request.data,
+                    table_summaries=deck.get("table_summaries"),
+                )
+                if isinstance(visualized, dict):
+                    deck["slides"][idx] = _merge_slide_preserve_section_assets(deck["slides"][idx], visualized)
+                # Step 4 (final): layout zoning for zone-based frontend rendering
+                try:
+                    zoning = slide_layout_zoning_single_call(
+                        problem_statement=request.problem_statement,
+                        storyline=outline_titles,
+                        num_slides=request.num_slides,
+                        slide=deck["slides"][idx],
+                    )
+                    if isinstance(zoning, dict):
+                        if zoning.get("slide_design"):
+                            deck["slides"][idx]["slide_design"] = zoning.get("slide_design")
+                        if zoning.get("zone_contents"):
+                            deck["slides"][idx]["zone_contents"] = zoning.get("zone_contents")
+                        if isinstance(zoning.get("suggested_layouts"), list):
+                            deck["slides"][idx]["suggested_layouts"] = zoning.get("suggested_layouts")
+                        placements = zoning.get("sections_layout") or []
+                        sections = deck["slides"][idx].get("sections", []) or []
+                        for pl in placements:
+                            if not isinstance(pl, dict):
+                                continue
+                            i = pl.get("index")
+                            if i is None or not isinstance(i, int):
+                                continue
+                            if i < 0 or i >= len(sections):
+                                continue
+                            sec = sections[i]
+                            if "x" in pl:
+                                sec["x"] = pl.get("x")
+                            if "y" in pl:
+                                sec["y"] = pl.get("y")
+                            if "w" in pl:
+                                sec["w"] = pl.get("w")
+                            if "h" in pl:
+                                sec["h"] = pl.get("h")
+                            if "zone" in pl:
+                                sec["zone"] = pl.get("zone")
+                            hide = pl.get("hide_card_header")
+                            if hide is None:
+                                hide = pl.get("hideCardHeader")
+                            if isinstance(hide, bool):
+                                sec["hideCardHeader"] = hide
+                            if pl.get("title") is not None:
+                                sec["title"] = pl.get("title")
+                            if pl.get("content") is not None:
+                                sec["content"] = pl.get("content")
+                except Exception:
+                    pass
+
+                yield _sse_ndjson_event("slide_update", {"slide_index": idx, "stage": "visuals_ready", "slide": deck["slides"][idx]})
+
+            deck["optimized_storyline"] = outline_titles
+            try:
+                safe_result = sanitize_for_json(deck)
+            except Exception:
+                safe_result = deck
+            yield _sse_ndjson_event("done", {"deck": safe_result})
+        except Exception as e:
+            yield _sse_ndjson_event("error", {"message": str(e)})
+
+    return StreamingResponse(event_gen(), media_type="application/x-ndjson")
 
 # --- API Call for Chart Plotting Data ---
 #@app.post("/generate_chart_data")

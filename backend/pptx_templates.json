@@ -1,0 +1,258 @@
+{
+  "schema_version": "1.0",
+  "meta": {
+    "description": "PPTX-friendly deterministic slide templates modeled from attached references",
+    "coordinate_system": "absolute_px",
+    "canvas": { "width": 1920, "height": 1080, "aspect_ratio": "16:9" },
+    "defaults": {
+      "font_family": "Aptos",
+      "title_color": "#0b0f19",
+      "body_color": "#0f172a",
+      "accent_blue": "#142b6f",
+      "accent_light_blue": "#5e95cf",
+      "accent_teal": "#1fc0b8",
+      "neutral_bg": "#f3f4f6",
+      "surface_bg": "#eceef2",
+      "safe_margin": 54
+    }
+  },
+  "overflow_rules": {
+    "title_max_lines": 2,
+    "subtitle_max_lines": 2,
+    "body_max_lines_per_block": 8,
+    "bullet_max_count": 6,
+    "auto_fit": {
+      "min_font_size": 16,
+      "line_height_scale_min": 1.05,
+      "truncate_with_ellipsis": true,
+      "secondary_action_if_overflow": "split_content_to_new_slide"
+    }
+  },
+  "templates": [
+    {
+      "id": "source_description_application",
+      "name": "Template - [type of slide]",
+      "use_case": ["definition", "method", "taxonomy"],
+      "regions": [
+        { "id": "title", "kind": "text", "x": 60, "y": 56, "w": 1800, "h": 80, "style": { "font_size": 62, "font_weight": 800 } },
+        { "id": "label_source", "kind": "text", "x": 60, "y": 192, "w": 260, "h": 68, "style": { "font_size": 56, "font_weight": 700, "color": "#1a2f85" } },
+        { "id": "source_box", "kind": "text", "x": 340, "y": 182, "w": 1520, "h": 90, "style": { "font_size": 40 } },
+        { "id": "label_description", "kind": "text", "x": 60, "y": 300, "w": 260, "h": 68, "style": { "font_size": 56, "font_weight": 700, "color": "#1a2f85" } },
+        { "id": "description_box", "kind": "text", "x": 340, "y": 290, "w": 1520, "h": 400, "style": { "font_size": 34 } },
+        { "id": "label_application", "kind": "text", "x": 60, "y": 706, "w": 260, "h": 68, "style": { "font_size": 56, "font_weight": 700, "color": "#1a2f85" } },
+        { "id": "application_box", "kind": "list", "x": 340, "y": 696, "w": 1520, "h": 290, "style": { "font_size": 34, "bullet": true } },
+        { "id": "footer_logo", "kind": "shape", "shape": "rect", "x": 60, "y": 1014, "w": 258, "h": 38, "style": { "fill": "#e5e7eb" } },
+        { "id": "footer_source", "kind": "text", "x": 372, "y": 1014, "w": 430, "h": 36, "style": { "font_size": 20, "color": "#8a8f98" } },
+        { "id": "footer_page", "kind": "text", "x": 1830, "y": 1014, "w": 30, "h": 36, "style": { "font_size": 20, "align": "right" } }
+      ]
+    },
+    {
+      "id": "why_umbrex_cards_5",
+      "name": "Why Umbrex 5 Cards",
+      "use_case": ["value_prop", "reasons", "proof_points"],
+      "regions": [
+        { "id": "title", "kind": "text", "x": 60, "y": 54, "w": 1000, "h": 82, "style": { "font_size": 62, "font_weight": 800 } },
+        { "id": "cta", "kind": "shape_text", "x": 1430, "y": 58, "w": 420, "h": 76, "style": { "fill": "#08246b", "text_color": "#ffffff", "font_size": 30, "font_weight": 700, "align": "center" } },
+        { "id": "body_para_1", "kind": "text", "x": 60, "y": 154, "w": 1790, "h": 118, "style": { "font_size": 27, "color": "#102c73" } },
+        { "id": "body_para_2", "kind": "text", "x": 60, "y": 300, "w": 1790, "h": 94, "style": { "font_size": 27, "color": "#102c73" } },
+        { "id": "body_para_3", "kind": "text", "x": 60, "y": 416, "w": 1790, "h": 94, "style": { "font_size": 27, "color": "#102c73" } },
+        { "id": "cards_row", "kind": "repeat_group", "x": 60, "y": 560, "w": 1790, "h": 328, "repeat": { "count": 5, "direction": "row", "gap": 22 },
+          "children": [
+            { "id": "icon_circle", "kind": "shape", "shape": "circle", "x": 132, "y": -40, "w": 76, "h": 76, "style": { "stroke": "#17357f", "fill": "#f3f4f6", "stroke_width": 4 } },
+            { "id": "card", "kind": "shape", "shape": "rect", "x": 0, "y": 0, "w": 330, "h": 300, "style": { "fill": "#e9eaed" } },
+            { "id": "card_text", "kind": "text", "x": 28, "y": 104, "w": 274, "h": 168, "style": { "font_size": 26, "align": "center", "valign": "middle" } }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "framework_swot_4_cards_icon",
+      "name": "SWOT 4 Pillars With Icons",
+      "use_case": ["swot", "4_pillars"],
+      "regions": [
+        { "id": "title", "kind": "text", "x": 60, "y": 54, "w": 1200, "h": 82, "style": { "font_size": 62, "font_weight": 800 } },
+        { "id": "subtitle", "kind": "text", "x": 60, "y": 146, "w": 1200, "h": 58, "style": { "font_size": 50, "color": "#5b96d2" } },
+        { "id": "swot_row", "kind": "repeat_group", "x": 58, "y": 322, "w": 1794, "h": 640, "repeat": { "count": 4, "direction": "row", "gap": 36 },
+          "children": [
+            { "id": "icon_bg", "kind": "shape", "shape": "rect", "x": 154, "y": -82, "w": 116, "h": 116, "style": { "fill": "#1b2a88" } },
+            { "id": "card", "kind": "shape", "shape": "rect", "x": 0, "y": 0, "w": 425, "h": 664, "style": { "fill": "#eaebef" } },
+            { "id": "heading", "kind": "text", "x": 36, "y": 88, "w": 350, "h": 68, "style": { "font_size": 56, "font_weight": 700, "color": "#1a2f85", "align": "center" } },
+            { "id": "bullets", "kind": "list", "x": 36, "y": 186, "w": 350, "h": 444, "style": { "font_size": 24, "line_height": 1.14, "bullet": false } }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "stakeholder_analysis_table_4x4",
+      "name": "Stakeholder Analysis Table",
+      "use_case": ["table", "stakeholder"],
+      "regions": [
+        { "id": "title", "kind": "text", "x": 60, "y": 54, "w": 1300, "h": 82, "style": { "font_size": 62, "font_weight": 800 } },
+        { "id": "table", "kind": "table", "x": 58, "y": 182, "w": 1794, "h": 720,
+          "style": {
+            "header_fill": "#1d2589",
+            "header_text_color": "#ffffff",
+            "cell_fill": "#eaebef",
+            "font_size_header": 28,
+            "font_size_body": 24,
+            "row_gap": 32,
+            "col_gap": 24
+          },
+          "table_spec": { "columns": 4, "rows": 5, "header_height": 84, "row_height": 130 }
+        }
+      ]
+    },
+    {
+      "id": "executive_summary_3",
+      "name": "Executive Summary 3",
+      "use_case": ["summary", "narrative"],
+      "regions": [
+        { "id": "title", "kind": "text", "x": 60, "y": 54, "w": 1300, "h": 82, "style": { "font_size": 62, "font_weight": 800 } },
+        { "id": "subtitle", "kind": "text", "x": 60, "y": 146, "w": 800, "h": 56, "style": { "font_size": 50, "color": "#5b96d2" } },
+        { "id": "blocks", "kind": "repeat_group", "x": 166, "y": 270, "w": 1580, "h": 650, "repeat": { "count": 4, "direction": "column", "gap": 50 },
+          "children": [
+            { "id": "subhead", "kind": "text", "x": 0, "y": 0, "w": 260, "h": 48, "style": { "font_size": 36, "font_weight": 700, "color": "#5b96d2" } },
+            { "id": "subhead_rule", "kind": "shape", "shape": "line", "x": 0, "y": 58, "w": 260, "h": 2, "style": { "stroke": "#5b96d2", "stroke_width": 4 } },
+            { "id": "paragraph", "kind": "text", "x": 0, "y": 80, "w": 1520, "h": 84, "style": { "font_size": 24 } }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "executive_summary_5",
+      "name": "Executive Summary 5",
+      "use_case": ["summary", "bulleted_detail"],
+      "regions": [
+        { "id": "title", "kind": "text", "x": 60, "y": 54, "w": 1300, "h": 82, "style": { "font_size": 62, "font_weight": 800 } },
+        { "id": "subtitle", "kind": "text", "x": 60, "y": 146, "w": 800, "h": 56, "style": { "font_size": 50, "color": "#5b96d2" } },
+        { "id": "rows", "kind": "repeat_group", "x": 60, "y": 246, "w": 1800, "h": 742, "repeat": { "count": 4, "direction": "column", "gap": 28 },
+          "children": [
+            { "id": "heading", "kind": "text", "x": 0, "y": 0, "w": 1740, "h": 46, "style": { "font_size": 24, "font_weight": 700, "color": "#1a2f85" } },
+            { "id": "bullets", "kind": "list", "x": 0, "y": 52, "w": 1740, "h": 126, "style": { "font_size": 24, "bullet": true } }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "framework_crosshair_center",
+      "name": "Framework Crosshair Center",
+      "use_case": ["framework", "2x2_center"],
+      "regions": [
+        { "id": "title", "kind": "text", "x": 60, "y": 54, "w": 1300, "h": 82, "style": { "font_size": 62, "font_weight": 800 } },
+        { "id": "subtitle_band", "kind": "shape_text", "x": 58, "y": 126, "w": 1794, "h": 96, "style": { "stroke": "#333333", "dash": "dot", "text_color": "#5b96d2", "font_size": 50 } },
+        { "id": "v_line", "kind": "shape", "shape": "line", "x": 960, "y": 244, "w": 2, "h": 744, "style": { "stroke": "#bdbdbd", "stroke_width": 4, "dash": "dash" } },
+        { "id": "h_line", "kind": "shape", "shape": "line", "x": 60, "y": 654, "w": 1790, "h": 2, "style": { "stroke": "#bdbdbd", "stroke_width": 4, "dash": "dash" } },
+        { "id": "center_circle", "kind": "shape", "shape": "circle", "x": 770, "y": 432, "w": 380, "h": 380, "style": { "stroke": "#5b96d2", "fill": "transparent", "stroke_width": 4 } },
+        { "id": "quad_tl", "kind": "text", "x": 60, "y": 352, "w": 560, "h": 220, "style": { "font_size": 50 } },
+        { "id": "quad_tr", "kind": "text", "x": 1140, "y": 352, "w": 710, "h": 220, "style": { "font_size": 50 } },
+        { "id": "quad_bl", "kind": "text", "x": 60, "y": 826, "w": 560, "h": 146, "style": { "font_size": 50 } },
+        { "id": "quad_br", "kind": "text", "x": 1140, "y": 826, "w": 710, "h": 146, "style": { "font_size": 50 } }
+      ]
+    },
+    {
+      "id": "table_with_icon_headers",
+      "name": "Table With Icon Headers",
+      "use_case": ["table", "comparison"],
+      "regions": [
+        { "id": "title", "kind": "text", "x": 60, "y": 54, "w": 1300, "h": 82, "style": { "font_size": 62, "font_weight": 800 } },
+        { "id": "subtitle", "kind": "text", "x": 60, "y": 146, "w": 800, "h": 56, "style": { "font_size": 50, "color": "#5b96d2" } },
+        { "id": "header_icons_row", "kind": "repeat_group", "x": 60, "y": 236, "w": 1790, "h": 160, "repeat": { "count": 5, "direction": "row", "gap": 26 },
+          "children": [
+            { "id": "icon", "kind": "icon_placeholder", "x": 130, "y": 0, "w": 70, "h": 70, "style": { "stroke": "#5b96d2" } },
+            { "id": "header_label", "kind": "text", "x": 80, "y": 86, "w": 170, "h": 46, "style": { "font_size": 30, "font_weight": 700, "align": "center" } }
+          ]
+        },
+        { "id": "table_body", "kind": "table", "x": 60, "y": 420, "w": 1790, "h": 470, "style": { "font_size_body": 22, "row_gap": 0, "col_gap": 0, "row_rule_color": "#d1d5db" }, "table_spec": { "columns": 5, "rows": 3 } }
+      ]
+    },
+    {
+      "id": "bar_chart_with_insight_rail",
+      "name": "Bar Chart + Insight Rail",
+      "use_case": ["chart", "comparison"],
+      "regions": [
+        { "id": "title", "kind": "text", "x": 60, "y": 54, "w": 1300, "h": 82, "style": { "font_size": 62, "font_weight": 800 } },
+        { "id": "subtitle", "kind": "text", "x": 60, "y": 146, "w": 800, "h": 56, "style": { "font_size": 50, "color": "#5b96d2" } },
+        { "id": "chart_left", "kind": "chart", "x": 88, "y": 290, "w": 1210, "h": 682, "style": { "chart_type": "bar", "axis_color": "#c9c9c9", "series_colors": ["#0f225d"] } },
+        { "id": "insight_rail", "kind": "shape_text", "x": 1360, "y": 238, "w": 490, "h": 732, "style": { "stroke": "#404040", "fill": "transparent", "font_size": 24 } }
+      ]
+    },
+    {
+      "id": "waterfall_with_insight_rail",
+      "name": "Waterfall + Insight Rail",
+      "use_case": ["chart", "waterfall"],
+      "regions": [
+        { "id": "title", "kind": "text", "x": 60, "y": 54, "w": 1300, "h": 82, "style": { "font_size": 62, "font_weight": 800 } },
+        { "id": "subtitle", "kind": "text", "x": 60, "y": 146, "w": 800, "h": 56, "style": { "font_size": 50, "color": "#5b96d2" } },
+        { "id": "chart_left", "kind": "chart", "x": 88, "y": 290, "w": 1210, "h": 682, "style": { "chart_type": "waterfall", "series_colors": ["#0f225d"] } },
+        { "id": "insight_rail", "kind": "shape_text", "x": 1360, "y": 238, "w": 490, "h": 732, "style": { "stroke": "#404040", "fill": "transparent", "font_size": 24 } }
+      ]
+    },
+    {
+      "id": "heatmap_large",
+      "name": "Heatmap Full Width",
+      "use_case": ["heatmap", "risk_matrix"],
+      "regions": [
+        { "id": "title", "kind": "text", "x": 60, "y": 54, "w": 1300, "h": 82, "style": { "font_size": 62, "font_weight": 800 } },
+        { "id": "subtitle", "kind": "text", "x": 60, "y": 146, "w": 800, "h": 56, "style": { "font_size": 50, "color": "#5b96d2" } },
+        { "id": "heatmap", "kind": "chart", "x": 456, "y": 292, "w": 1130, "h": 640, "style": { "chart_type": "heatmap", "legend_at_bottom": true } }
+      ]
+    },
+    {
+      "id": "line_chart_annotated",
+      "name": "Line Chart Annotated",
+      "use_case": ["trend", "time_series"],
+      "regions": [
+        { "id": "title", "kind": "text", "x": 60, "y": 54, "w": 1300, "h": 82, "style": { "font_size": 62, "font_weight": 800 } },
+        { "id": "subtitle", "kind": "text", "x": 60, "y": 146, "w": 800, "h": 56, "style": { "font_size": 50, "color": "#5b96d2" } },
+        { "id": "line_chart", "kind": "chart", "x": 136, "y": 288, "w": 1690, "h": 664, "style": { "chart_type": "line_multi", "series_colors": ["#0f225d", "#5b96d2", "#1fc0b8"] } },
+        { "id": "anno_1", "kind": "annotation", "x": 560, "y": 356, "w": 430, "h": 140 },
+        { "id": "anno_2", "kind": "annotation", "x": 810, "y": 574, "w": 430, "h": 140 },
+        { "id": "anno_3", "kind": "annotation", "x": 1240, "y": 696, "w": 430, "h": 140 }
+      ]
+    },
+    {
+      "id": "multiple_chart_three_up",
+      "name": "Multiple Chart Three Up",
+      "use_case": ["small_multiples", "regional_compare"],
+      "regions": [
+        { "id": "title", "kind": "text", "x": 60, "y": 54, "w": 1300, "h": 82, "style": { "font_size": 62, "font_weight": 800 } },
+        { "id": "subtitle", "kind": "text", "x": 60, "y": 146, "w": 800, "h": 56, "style": { "font_size": 50, "color": "#5b96d2" } },
+        { "id": "charts", "kind": "repeat_group", "x": 88, "y": 292, "w": 1740, "h": 630, "repeat": { "count": 3, "direction": "row", "gap": 56 },
+          "children": [
+            { "id": "mini_chart", "kind": "chart", "x": 0, "y": 0, "w": 542, "h": 456, "style": { "chart_type": "line_multi" } },
+            { "id": "mini_caption", "kind": "text", "x": 128, "y": 470, "w": 370, "h": 130, "style": { "font_size": 22 } }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "key_points_diagram_cards_4",
+      "name": "Template - Key points diagram",
+      "use_case": ["key_points", "multi_content_cards", "four_pillars"],
+      "regions": [
+        { "id": "title", "kind": "text", "x": 60, "y": 54, "w": 1300, "h": 82, "style": { "font_size": 62, "font_weight": 800, "color": "#0b0f19" } },
+        { "id": "subtitle", "kind": "text", "x": 60, "y": 146, "w": 800, "h": 56, "style": { "font_size": 50, "color": "#5b96d2" } },
+        { "id": "top_band", "kind": "shape_text", "x": 60, "y": 244, "w": 1790, "h": 78, "style": { "fill": "#6296C7", "text_color": "#ffffff", "font_size": 28, "font_weight": 700, "align": "center", "valign": "middle" } },
+        {
+          "id": "cards",
+          "kind": "repeat_group",
+          "x": 60,
+          "y": 412,
+          "w": 1790,
+          "h": 584,
+          "repeat": { "count": 4, "direction": "row", "gap": 32 },
+          "children": [
+            { "id": "card_bg", "kind": "shape", "shape": "rect", "x": 0, "y": 0, "w": 438, "h": 584, "style": { "fill": "#ECEDEF" } },
+            { "id": "icon_circle", "kind": "shape", "shape": "circle", "x": 158, "y": -64, "w": 122, "h": 122, "style": { "fill": "#17BFB7", "stroke": "#17BFB7", "stroke_width": 2 } },
+            { "id": "icon", "kind": "icon_placeholder", "x": 188, "y": -34, "w": 64, "h": 64, "style": { "stroke": "#ffffff", "stroke_width": 2.5 } },
+            { "id": "card_title", "kind": "text", "x": 0, "y": 96, "w": 438, "h": 52, "style": { "font_size": 50, "font_weight": 700, "align": "center", "color": "#0b0f19" } },
+            { "id": "card_body", "kind": "text", "x": 54, "y": 188, "w": 330, "h": 322, "style": { "font_size": 42, "align": "center", "valign": "top", "color": "#111827" } }
+          ]
+        },
+        { "id": "footer_logo", "kind": "shape", "shape": "rect", "x": 60, "y": 1014, "w": 258, "h": 38, "style": { "fill": "#e5e7eb" } },
+        { "id": "footer_source", "kind": "text", "x": 372, "y": 1014, "w": 430, "h": 36, "style": { "font_size": 20, "color": "#8a8f98" } },
+        { "id": "footer_page", "kind": "text", "x": 1830, "y": 1014, "w": 30, "h": 36, "style": { "font_size": 20, "align": "right" } }
+      ]
+    }
+  ]
+}

@@ -40,7 +40,11 @@ const dummyData = {
   "Polar Area Chart": { labels: ["A", "B", "C"], values: [11, 16, 7] },
   "Bubble Chart": { labels: ["A", "B", "C"], datasets: [{ label: "Bubbles", data: [{ x: 10, y: 20, r: 10 }, { x: 15, y: 10, r: 15 }, { x: 7, y: 25, r: 7 }] }] },
   "Scatter Plot": { labels: ["A", "B", "C"], datasets: [{ label: "Scatter", data: [{ x: 10, y: 20 }, { x: 15, y: 10 }, { x: 7, y: 25 }] }] },
-  "Doughnut Chart": { labels: ["A", "B", "C"], values: [30, 40, 30] },
+  "Doughnut Chart": [
+    { label: "A", value: 30 },
+    { label: "B", value: 40 },
+    { label: "C", value: 30 },
+  ],
   "Waterfall Chart": {
     steps: ["Start", "Add", "Subtract", "End"],
     values: [100, 50, -30, 120]
@@ -60,7 +64,7 @@ const COLORS = DEFAULT_COLORS;
 // Map backend chart names to supported frontend renderer types or sensible fallbacks
 const CHART_ALIAS = {
   "Horizontal Bar Chart": "Gantt Chart", // use chartjs horizontal bar
-  "Grouped Bar Chart": "Stacked Bar Chart",
+  "Grouped Bar Chart": "Grouped Bar Chart",
   "100% Stacked Bar Chart": "Stacked Bar Chart",
   "Multi-series Line Chart": "Multi-Series Line Chart",
   "Multi-series Line": "Multi-Series Line Chart",
@@ -73,7 +77,7 @@ const CHART_ALIAS = {
   "Violin Plot": "Histogram",
   "Hexbin Plot": "Heatmap",
   "Pareto Chart": "Bar Chart",
-  "Funnel Chart": "Bar Chart",
+  "Funnel Chart": "Funnel Chart",
   "Sankey Diagram": "Stacked Bar Chart",
   "Alluvial Diagram": "Stacked Bar Chart",
   "Treemap": "Doughnut Chart",
@@ -95,6 +99,11 @@ const CHART_ALIAS = {
   "Ternary Plot": "Doughnut Chart",
   "Waffle Chart": "Doughnut Chart",
   "Donut Chart": "Doughnut Chart",
+  "Donut": "Doughnut Chart",
+  "donut": "Doughnut Chart",
+  "donut chart": "Doughnut Chart",
+  "doughnut": "Doughnut Chart",
+  "doughnut chart": "Doughnut Chart",
   "Bullet Chart": "Bar Chart",
   "KPI Tile": "Bar Chart",
   "Tornado Chart": "Gantt Chart",
@@ -174,6 +183,65 @@ function buildHistogramData(rawValues, buckets = 8) {
   return out;
 }
 
+function buildFunnelStages(type, data) {
+  if (Array.isArray(data) && data.length) {
+    return data.map((d, i) => ({
+      label: String(d?.label ?? d?.name ?? `Stage ${i + 1}`),
+      value: Number(d?.value ?? d ?? 0),
+    }));
+  }
+  if (data && Array.isArray(data.labels) && Array.isArray(data.values)) {
+    return data.labels.map((label, i) => ({ label: String(label), value: Number(data.values[i] ?? 0) }));
+  }
+  if (data && Array.isArray(data.stages) && Array.isArray(data.values)) {
+    return data.stages.map((label, i) => ({ label: String(label), value: Number(data.values[i] ?? 0) }));
+  }
+  const fallback = normalizeChartData(type, data);
+  if (Array.isArray(fallback) && fallback.length) {
+    return fallback.map((d, i) => ({
+      label: String(d?.label ?? d?.name ?? `Stage ${i + 1}`),
+      value: Number(d?.value ?? 0),
+    }));
+  }
+  return [
+    { label: "Awareness", value: 100 },
+    { label: "Interest", value: 70 },
+    { label: "Consideration", value: 45 },
+    { label: "Conversion", value: 25 },
+  ];
+}
+
+function buildFallbackInferences(type, data, plotData) {
+  const rows = Array.isArray(plotData) ? plotData : [];
+  const values = rows.map((r) => Number(r?.value)).filter((n) => Number.isFinite(n));
+  const labels = rows.map((r) => String(r?.label ?? "")).filter(Boolean);
+
+  if (values.length >= 2) {
+    const max = Math.max(...values);
+    const min = Math.min(...values);
+    const maxIdx = values.indexOf(max);
+    const minIdx = values.indexOf(min);
+    const first = values[0];
+    const last = values[values.length - 1];
+    const deltaPct = first !== 0 ? (((last - first) / Math.abs(first)) * 100) : 0;
+    const trendWord = last > first ? "upward" : (last < first ? "downward" : "flat");
+    return [
+      `${labels[maxIdx] || "Top category"} leads at ${Math.round(max)}, while ${labels[minIdx] || "lowest category"} is lowest at ${Math.round(min)}.`,
+      `${String(type || "Chart")} shows a ${trendWord} movement of ${Math.round(Math.abs(deltaPct))}% from start to end.`,
+    ];
+  }
+
+  if (data && Array.isArray(data?.values) && data.values.length > 0) {
+    const nums = data.values.map((v) => Number(v)).filter((n) => Number.isFinite(n));
+    if (nums.length) {
+      const avg = nums.reduce((a, b) => a + b, 0) / nums.length;
+      return [`Average value is ${Math.round(avg)} across ${nums.length} data points.`];
+    }
+  }
+
+  return [`${String(type || "Chart")} inference: key drivers and outliers should be validated before final recommendation.`];
+}
+
 // Lightweight heatmap renderer: expects data.matrix = [[v11, v12], ...] or data as array of rows
 function Heatmap({ data, palette = DEFAULT_COLORS }) {
   const matrix = data && Array.isArray(data.matrix) ? data.matrix : (Array.isArray(data) ? data : []);
@@ -206,11 +274,13 @@ function Heatmap({ data, palette = DEFAULT_COLORS }) {
 // Chart.js supported types mapping
 const chartjsTypeMap = {
   "Bar Chart": "bar",
+  "Grouped Bar Chart": "bar",
   "Line Chart": "line",
   "Multi Series Line Chart": "line",
   "Multi-Series Line Chart": "line",
   "Pie Chart": "pie",
   "Doughnut Chart": "doughnut",
+  "Donut Chart": "doughnut",
   "Radar Chart": "radar",
   "Polar Area Chart": "polarArea",
   "Bubble Chart": "bubble",
@@ -224,11 +294,13 @@ const chartjsTypeMap = {
 function getChartJSComponent(type) {
   switch (type) {
     case "Bar Chart": return ChartJSBar;
+    case "Grouped Bar Chart": return ChartJSBar;
     case "Line Chart": return ChartJSLine;
     case "Multi Series Line Chart": return ChartJSLine;
     case "Multi-Series Line Chart": return ChartJSLine;
     case "Pie Chart": return ChartJSPie;
     case "Doughnut Chart": return ChartJSDoughnut;
+    case "Donut Chart": return ChartJSDoughnut;
     case "Radar Chart": return ChartJSRadar;
     case "Polar Area Chart": return ChartJSPolarArea;
     case "Bubble Chart": return ChartJSBubble;
@@ -243,6 +315,43 @@ function getChartJSComponent(type) {
 
 function getChartJSData(type, data) {
   // Convert normalized data to Chart.js format
+  if (["Grouped Bar Chart"].includes(type)) {
+    if (data && Array.isArray(data.datasets) && Array.isArray(data.labels)) {
+      return {
+        labels: data.labels,
+        datasets: data.datasets.map((ds, i) => ({
+          label: ds.label || `Series ${i + 1}`,
+          data: Array.isArray(ds.data) ? ds.data : [],
+          backgroundColor: ds.backgroundColor || DEFAULT_COLORS[i % DEFAULT_COLORS.length],
+          borderColor: ds.borderColor || ds.backgroundColor || DEFAULT_COLORS[i % DEFAULT_COLORS.length],
+          borderWidth: 1,
+        })),
+      };
+    }
+    if (data && Array.isArray(data.series) && Array.isArray(data.labels)) {
+      return {
+        labels: data.labels,
+        datasets: data.series.map((s, i) => ({
+          label: s.name || `Series ${i + 1}`,
+          data: Array.isArray(s.values) ? s.values : [],
+          backgroundColor: s.color || DEFAULT_COLORS[i % DEFAULT_COLORS.length],
+          borderColor: s.color || DEFAULT_COLORS[i % DEFAULT_COLORS.length],
+          borderWidth: 1,
+        })),
+      };
+    }
+    const arr = normalizeChartData("Bar Chart", data);
+    return {
+      labels: arr.map(d => d.label),
+      datasets: [{
+        label: "Series 1",
+        data: arr.map(d => d.value),
+        backgroundColor: DEFAULT_COLORS[0],
+        borderColor: DEFAULT_COLORS[0],
+        borderWidth: 1,
+      }],
+    };
+  }
   if (["Bar Chart", "Line Chart", "Multi Series Line Chart", "Multi-Series Line Chart"].includes(type)) {
     // If user provided Chart.js-style datasets or series, use them to build multi-series datasets
     if (data && Array.isArray(data.datasets) && data.datasets.length > 0) {
@@ -387,13 +496,18 @@ function getChartJSData(type, data) {
       ]
     };
   }
-  if (["Pie Chart", "Doughnut Chart", "Radar Chart", "Polar Area Chart"].includes(type)) {
-    const arr = normalizeChartData(type, data);
+  if (["Pie Chart", "Doughnut Chart", "Donut Chart", "Radar Chart", "Polar Area Chart"].includes(type)) {
+    const arrRaw = normalizeChartData(type, data);
+    const arr = Array.isArray(arrRaw)
+      ? arrRaw
+      : (arrRaw && Array.isArray(arrRaw.labels) && Array.isArray(arrRaw.values)
+          ? arrRaw.labels.map((label, i) => ({ label, value: arrRaw.values[i] }))
+          : normalizeChartData("Pie Chart", data));
     return {
-      labels: arr.map(d => d.label),
+      labels: (Array.isArray(arr) ? arr : []).map(d => d?.label),
       datasets: [{
         label: type,
-        data: arr.map(d => d.value),
+        data: (Array.isArray(arr) ? arr : []).map(d => d?.value),
         backgroundColor: COLORS,
       }]
     };
@@ -420,13 +534,20 @@ export default function ChartRenderer({
 }) {
   const COLORS = normalizePalette(palette);
   const getColor = (i) => COLORS[i % COLORS.length];
+  const plotData = normalizeChartData(type, data);
+  const resolvedInferences = (
+    Array.isArray(inferences) && inferences.length > 0
+      ? inferences
+      : (Array.isArray(data?.inferences) && data.inferences.length > 0
+        ? data.inferences
+        : buildFallbackInferences(type, data, plotData))
+  );
   const meta = {
     xAxisTitle: xAxisTitle || data?.xAxisTitle || "Not available",
     yAxisTitle: yAxisTitle || data?.yAxisTitle || "Not available",
     legend: legend || data?.legend || "Not available",
-    inferences: inferences || data?.inferences || [],
+    inferences: resolvedInferences,
   };
-  const plotData = normalizeChartData(type, data);
   // Supported by Recharts
   const rechartsTypes = ["Bar Chart", "Line Chart", "Pie Chart"];
   // Supported by Chart.js
@@ -547,6 +668,31 @@ export default function ChartRenderer({
         <Heatmap data={data} palette={COLORS} />
       </div>
     );
+  } else if (type === "Funnel Chart" || type === "Funnel") {
+    const stages = buildFunnelStages(type, data).filter(s => Number.isFinite(s.value));
+    const maxValue = Math.max(1, ...stages.map(s => s.value));
+    chartContent = (
+      <div style={{ width: '100%', height, padding: 8, boxSizing: 'border-box' }}>
+        <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
+          {stages.map((s, i) => {
+            const n = Math.max(1, stages.length);
+            const rowH = 100 / n;
+            const y = i * rowH;
+            const ratio = Math.max(0.2, s.value / maxValue);
+            const w = 85 * ratio;
+            const x = (100 - w) / 2;
+            const color = getColor(i);
+            return (
+              <g key={`${s.label}-${i}`}>
+                <rect x={x} y={y + 2} width={w} height={Math.max(6, rowH - 4)} rx="2" ry="2" fill={color} opacity="0.85" />
+                <text x="2" y={y + rowH / 2 + 1} fontSize="3.2" fill="#111827">{`${s.label}`}</text>
+                <text x="98" y={y + rowH / 2 + 1} textAnchor="end" fontSize="3.2" fill="#111827">{`${Math.round(s.value)}`}</text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    );
   } else if (type === "Gantt Chart") {
     // Chart.js stacked horizontal bar
     const ChartJSComponent = getChartJSComponent(type);
@@ -636,17 +782,17 @@ export default function ChartRenderer({
   }
 
   return (
-    <div className="w-full h-auto flex flex-col" style={{ fontFamily: 'Inter, Arial, sans-serif' }}>
+    <div className="w-full h-full flex flex-col" style={{ fontFamily: 'Inter, Arial, sans-serif', maxWidth: '100%', maxHeight: '100%', overflow: 'hidden' }}>
       {/* Chart and metadata side by side, chart stretched */}
-      <div className="w-full flex flex-col items-stretch">
-        <div className="w-full">
+      <div className="w-full flex flex-col items-stretch" style={{ minHeight: 0 }}>
+        <div className="w-full" style={{ minHeight: 0, maxHeight: '100%', overflow: 'hidden' }}>
           {chartContent}
         </div>
         {/* Metadata (X/Y/Legend) - can be shown above chart if needed, but omitted for minimalism */}
       </div>
       {/* Inferences below chart, styled like the provided image */}
       {meta.inferences && meta.inferences.length > 0 && (
-        <div className="mt-4">
+        <div className="mt-4" style={{ overflow: 'auto', maxHeight: '35%' }}>
           <div className="font-bold text-gray-900 text-base mb-1">Inferences:</div>
 
           {meta.inferences.map((inference, idx) => {
