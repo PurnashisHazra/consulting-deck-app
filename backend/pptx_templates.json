@@ -5,7 +5,7 @@
     "coordinate_system": "absolute_px",
     "canvas": { "width": 1920, "height": 1080, "aspect_ratio": "16:9" },
     "defaults": {
-      "font_family": "Aptos",
+      "font_family": "Verdana",
       "title_color": "#0b0f19",
       "body_color": "#0f172a",
       "accent_blue": "#142b6f",
@@ -198,7 +198,7 @@
       ]
     },
     {
-      "id": "line_chart_annotated",
+      "id": "line_chart",
       "name": "Line Chart Annotated",
       "use_case": ["trend", "time_series"],
       "regions": [
@@ -211,7 +211,7 @@
       ]
     },
     {
-      "id": "multiple_chart_three_up",
+      "id": "multiple_chart",
       "name": "Multiple Chart Three Up",
       "use_case": ["small_multiples", "regional_compare"],
       "regions": [

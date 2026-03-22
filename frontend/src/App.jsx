@@ -1,9 +1,10 @@
 import React from "react";
 import { Route, Routes, Navigate, useNavigate } from "react-router-dom";
-import { useState, useEffect, createContext, useContext } from "react";
+import { useState, useEffect, createContext, useContext, useCallback } from "react";
 import SlideForm from "./components/SlideForm";
 import CanvasSlidePreview from "./components/CanvasSlidePreview";
 import ProblemEnrichModal from "./components/ProblemEnrichModal";
+import GeneratingSlidesModal from "./components/GeneratingSlidesModal";
 import { generateSlides, generateSlidesMultiStepStream, API_BASE_URL, fetchSavedDecks, saveDeck } from "./api";
 import LoginSignup from "./components/LoginSignup";
 import HomePage from "./components/HomePage";
@@ -498,6 +499,14 @@ function App() {
   const [showCoinDropdown, setShowCoinDropdown] = useState(false);
   const [savedDecks, setSavedDecks] = useState([]);
   const [showSavedDecksDropdown, setShowSavedDecksDropdown] = useState(false);
+  /** Increment when opening a saved deck so CanvasSlidePreview remounts with a clean canvas. */
+  const [canvasMountKey, setCanvasMountKey] = useState(0);
+  const [canvasRefreshing, setCanvasRefreshing] = useState(false);
+  const finishCanvasLoad = useCallback(() => {
+    setCanvasRefreshing(false);
+  }, []);
+  /** Bumps when a new deck is shown on the canvas (generation or saved deck) — drives PPTX download hint. */
+  const [pptxHintKey, setPptxHintKey] = useState(0);
   // Fetch user name if authenticated
   useEffect(() => {
     
@@ -598,6 +607,7 @@ function App() {
           setSlides(mockResponse.slides);
           setOptimizedStoryline(mockResponse.optimized_storyline);
           setIsLoading(false);
+          setPptxHintKey((k) => k + 1);
         }, 1000);
       } else {
         //Check if user has enough coins to generate that #slides
@@ -692,6 +702,7 @@ function App() {
           alert(err.detail || 'Failed to consume coin');
         }
         setIsLoading(false);
+        setPptxHintKey((k) => k + 1);
       }
     } catch (err) {
       console.error(err);
@@ -727,6 +738,7 @@ function App() {
         }
         setModalOpen(false);
     }} />
+      <GeneratingSlidesModal open={isLoading} />
 
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -911,9 +923,13 @@ function App() {
                                   onClick={() => {
                                     // Load the saved deck into the canvas
                                     try {
+                                      setCanvasRefreshing(true);
                                       const deck = d.deck || d;
+                                      setCurrentSlideIndex(0);
                                       setSlides(deck.slides || []);
                                       setOptimizedStoryline(deck.optimized_storyline || []);
+                                      setCanvasMountKey((k) => k + 1);
+                                      setPptxHintKey((k) => k + 1);
                                       // track that we're editing this saved deck
                                       setCurrentSavedDeckId(d.deck_id || d._id || null);
                                       setShowSavedDecksDropdown(false);
@@ -922,6 +938,7 @@ function App() {
                                       showEnrichTip('Want more detail? Click "Enrich content" on any section to add bullets, charts, or frameworks.');
                                     } catch (e) {
                                       console.error('Failed to load deck', e);
+                                      setCanvasRefreshing(false);
                                     }
                                   }}
                                   className="w-full text-left px-4 py-2 hover:bg-gray-100 text-sm"
@@ -1012,22 +1029,41 @@ function App() {
                         setOptimizedStoryline(mockResponse.optimized_storyline);
                       }}
                     /> */}
-                    {/* Canvas Slide Preview */}
-                    <div className="mt-6">
-                      <CanvasSlidePreview 
-                      slides={slides} 
-                      zoom={zoom} 
-                      currentSlideIndex={currentSlideIndex} 
-                      setCurrentSlideIndex={setCurrentSlideIndex} 
-                      optimizedStoryline={optimizedStoryline}
-                      onGenerateMockSlides={() => {
-                        setUseMockData(true);
-                        setSlides(mockResponse.slides);
-                        setOptimizedStoryline(mockResponse.optimized_storyline);
-                      }}
-                      token={token}
-                      setUserCoins={setUserCoins}
-                      userCoins={userCoins}
+                    {/* Canvas Slide Preview — key remounts canvas when a saved deck is opened */}
+                    <div className="relative mt-6 min-h-[24rem]">
+                      {canvasRefreshing && (
+                        <div
+                          className="absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-white/85 backdrop-blur-sm"
+                          aria-busy="true"
+                          aria-live="polite"
+                        >
+                          <div className="flex flex-col items-center gap-3">
+                            <div
+                              className="h-11 w-11 rounded-full border-2 border-blue-600 border-t-transparent animate-spin"
+                              role="status"
+                            />
+                            <span className="text-sm font-medium text-gray-700">Loading canvas…</span>
+                          </div>
+                        </div>
+                      )}
+                      <CanvasSlidePreview
+                        key={canvasMountKey}
+                        slides={slides}
+                        zoom={zoom}
+                        currentSlideIndex={currentSlideIndex}
+                        setCurrentSlideIndex={setCurrentSlideIndex}
+                        optimizedStoryline={optimizedStoryline}
+                        onGenerateMockSlides={() => {
+                          setUseMockData(true);
+                          setSlides(mockResponse.slides);
+                          setOptimizedStoryline(mockResponse.optimized_storyline);
+                          setPptxHintKey((k) => k + 1);
+                        }}
+                        deckPptxHintKey={pptxHintKey}
+                        onCanvasReady={canvasRefreshing ? finishCanvasLoad : undefined}
+                        token={token}
+                        setUserCoins={setUserCoins}
+                        userCoins={userCoins}
                       />
                     </div>
                   </div>

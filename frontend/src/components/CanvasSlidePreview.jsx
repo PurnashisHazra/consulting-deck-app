@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import Draggable from "react-draggable";
 import FrameworkDiagram from "./FrameworkDiagram";
 import ChartRenderer from "./ChartRenderer";
@@ -11,7 +11,18 @@ import { parseListItems } from '../utils/parseList';
 import { ENABLE_INLINE_EDITING } from '../config';
 import { Card, Text } from "@mantine/core";
 
-export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex = 0, setCurrentSlideIndex, optimizedStoryline, onGenerateMockSlides }) {
+export default function CanvasSlidePreview({
+    slides,
+    zoom = 1,
+    currentSlideIndex = 0,
+    setCurrentSlideIndex,
+    optimizedStoryline,
+    onGenerateMockSlides,
+    /** Called after layout when parent needs to hide a loading overlay (e.g. saved deck open). */
+    onCanvasReady,
+    /** Increment when a new deck is loaded — shows animated arrow toward Download PPTX. */
+    deckPptxHintKey = 0,
+}) {
     const [slideCanvasState, setSlideCanvasState] = useState({});
     const [editingMap, setEditingMap] = useState({});
     const [editingValues, setEditingValues] = useState({});
@@ -24,6 +35,49 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
     const [showColorPicker, setShowColorPicker] = useState(false);
     const [activeEditId, setActiveEditId] = useState(null);
     const canvasRef = useRef(null);
+    const pptxDownloadBtnRef = useRef(null);
+    const [pptxSpotlightActive, setPptxSpotlightActive] = useState(false);
+    const [pptxBtnLayout, setPptxBtnLayout] = useState(null);
+
+    useLayoutEffect(() => {
+        if (!deckPptxHintKey || !slides?.length) return;
+        setPptxSpotlightActive(true);
+    }, [deckPptxHintKey, slides?.length]);
+
+    useEffect(() => {
+        if (!deckPptxHintKey || !slides?.length) return;
+        const t = window.setTimeout(() => {
+            setPptxSpotlightActive(false);
+            setPptxBtnLayout(null);
+        }, 12000);
+        return () => clearTimeout(t);
+    }, [deckPptxHintKey, slides?.length]);
+
+    useLayoutEffect(() => {
+        if (!pptxSpotlightActive) {
+            setPptxBtnLayout(null);
+            return;
+        }
+        const measure = () => {
+            const el = pptxDownloadBtnRef.current;
+            if (!el) return;
+            const r = el.getBoundingClientRect();
+            setPptxBtnLayout({
+                cx: r.left + r.width / 2,
+                endTop: Math.max(0, r.top - 24),
+            });
+        };
+        measure();
+        const raf = requestAnimationFrame(() => measure());
+        const onResize = () => measure();
+        window.addEventListener("resize", onResize);
+        window.addEventListener("scroll", onResize, true);
+        return () => {
+            cancelAnimationFrame(raf);
+            window.removeEventListener("resize", onResize);
+            window.removeEventListener("scroll", onResize, true);
+        };
+    }, [pptxSpotlightActive, slides, currentSlideIndex, isFullScreen]);
     const [measuredSize, setMeasuredSize] = useState({ width: 1280, height: 720 });
     const autoLayoutAppliedRef = useRef(new Set());
     const [frameworkDataOverrides, setFrameworkDataOverrides] = useState({});
@@ -248,6 +302,8 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
     };
 
     const exportDeckToPptx = async () => {
+        setPptxSpotlightActive(false);
+        setPptxBtnLayout(null);
         try {
             if (!slides || slides.length === 0) {
                 alert('No slides to export.');
@@ -1732,6 +1788,18 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
     }, [slides]);
 
     useEffect(() => {
+        if (!onCanvasReady) return;
+        if (!slides || slides.length === 0) {
+            onCanvasReady();
+            return;
+        }
+        const t = window.setTimeout(() => {
+            onCanvasReady();
+        }, 140);
+        return () => clearTimeout(t);
+    }, [slides, onCanvasReady]);
+
+    useEffect(() => {
         if (currentSlide && !slideCanvasState.hasOwnProperty(currentSlideIndex)) {
             const initial = removeRepetitiveItems(getDefaultCanvasItems(currentSlide));
             setSlideCanvasState(prev => ({
@@ -2414,7 +2482,13 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                     </button>
 
                     <button
-                        className="text-white bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded flex items-center gap-2 shadow transition"
+                        ref={pptxDownloadBtnRef}
+                        type="button"
+                        className={`text-white bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded flex items-center gap-2 shadow transition ${
+                            pptxSpotlightActive
+                                ? "relative z-[99999] ring-2 ring-amber-400 ring-offset-2 ring-offset-black shadow-[0_0_28px_rgba(251,191,36,0.95)]"
+                                : ""
+                        }`}
                         onClick={exportDeckToPptx}
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2445,6 +2519,51 @@ export default function CanvasSlidePreview({ slides, zoom = 1, currentSlideIndex
                 onClose={() => setEnrichModal({ open: false, itemId: null, initialContent: '' })}
                 onDone={(content) => applyEnrichedContent(enrichModal.itemId, content)}
             />
+
+            {pptxSpotlightActive && pptxBtnLayout && (
+                <>
+                    <style>{`
+                        @keyframes pitchmate-pptx-arrow-run {
+                            0% { top: min(10vh, 96px); opacity: 0; }
+                            8% { opacity: 0.55; }
+                            88% { top: var(--pptx-arrow-end); opacity: 0.5; }
+                            100% { top: var(--pptx-arrow-end); opacity: 0; }
+                        }
+                    `}</style>
+                    <div
+                        className="fixed inset-0 pointer-events-none z-[99998] overflow-hidden"
+                        aria-hidden
+                    >
+                        <div
+                            className="absolute flex w-20 justify-center"
+                            style={{
+                                left: pptxBtnLayout.cx,
+                                transform: "translateX(-50%)",
+                                "--pptx-arrow-end": `${pptxBtnLayout.endTop}px`,
+                                animation: "pitchmate-pptx-arrow-run 2.4s ease-in-out 1 forwards",
+                            }}
+                        >
+                            <svg
+                                width="64"
+                                height="64"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                xmlns="http://www.w3.org/2000/svg"
+                                className="text-slate-300"
+                                style={{ filter: "drop-shadow(0 1px 4px rgba(148,163,184,0.35))" }}
+                            >
+                                <path
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="M12 4v14M8 14l4 4 4-4"
+                                />
+                            </svg>
+                        </div>
+                    </div>
+                </>
+            )}
         </>
     );
 }

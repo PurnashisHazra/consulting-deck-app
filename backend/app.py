@@ -24,6 +24,7 @@ import math
 import json
 import re
 from infographics_repo import INFOGRAPHIC_REPO
+from pptx_template_select import apply_pptx_template_to_slide
 
 load_dotenv()
 def clean_numbers(obj):
@@ -1604,17 +1605,22 @@ async def generate_slides(request: SlideRequest, authorization: str = Header(Non
             # Use the finalized visuals/content coming from the deterministic pipeline.
             slides = result.get("slides", []) or []
             for idx, slide in enumerate(slides):
+                fixed_sd = apply_pptx_template_to_slide(
+                    slide,
+                    request.problem_statement,
+                    request.storyline or [],
+                )
                 patch = slide_layout_zoning_single_call(
                     problem_statement=request.problem_statement,
                     storyline=request.storyline,
                     num_slides=request.num_slides,
                     slide=slide,
+                    fixed_slide_design=fixed_sd,
                 )
                 if not isinstance(patch, dict):
                     continue
-                # Apply zone overlay content
-                if patch.get("slide_design"):
-                    slide["slide_design"] = patch.get("slide_design")
+                # PPTX template geometry is chosen before zoning; keep it (Canvas + overlap pass use zones.body).
+                slide["slide_design"] = fixed_sd
                 if patch.get("zone_contents"):
                     slide["zone_contents"] = patch.get("zone_contents")
                 if isinstance(patch.get("suggested_layouts"), list):
@@ -1732,6 +1738,7 @@ def slide_layout_zoning_single_call(
     storyline: List[str],
     num_slides: int,
     slide: dict,
+    fixed_slide_design: Optional[dict] = None,
 ) -> Optional[dict]:
     """
     Step 4: Layout zainer.
@@ -1814,6 +1821,10 @@ def slide_layout_zoning_single_call(
         return picked
 
     layout_repo_candidates = _select_layout_repo_candidates(slide, top_k=18)
+
+    fixed_zones_json = ""
+    if isinstance(fixed_slide_design, dict) and fixed_slide_design.get("zones"):
+        fixed_zones_json = json.dumps(sanitize_for_json(fixed_slide_design), ensure_ascii=False)
 
     system_instructions = """
 You are a senior consulting deck art director.
@@ -1931,6 +1942,67 @@ layout_id:
 - If none fit, return 'custom_layout'.
 """
 
+    if fixed_zones_json:
+        tmpl_id = slide.get("pptx_template_id") or "custom_layout"
+        system_instructions = f"""
+You are a senior consulting deck art director.
+A PPTX catalog template has ALREADY been chosen for this slide. Zone geometry is FIXED — do not invent a new slide_design.
+
+FIXED slide_design (1280x720 canvas):
+{fixed_zones_json}
+
+You MUST output ONLY JSON (no markdown) with keys:
+  - layout_id (string) — use "{tmpl_id}" unless you must return custom_layout
+  - suggested_layouts: array (max 3) of objects:
+      {{ "name": string (prefer from candidate layout repo), "reason": string }}
+  - zone_contents:
+      {{ "title": string, "subtitle": string|null, "footer": string, "side": string|null, "insight_strip": string|null }}
+  - sections_layout:
+      array length == len(input_slide.sections)
+      each element:
+        {{ "index": i, "zone": string, "x": number, "y": number, "w": number, "h": number,
+          "hide_card_header": boolean|null,
+          "title": string|null,
+          "content": string|null }}
+
+Do NOT include slide_design in your output; geometry is applied server-side.
+
+Coordinate rules:
+- Canvas is 1280 x 720. Place each sections_layout box fully inside FIXED zones.body when the section is main content; use zones.side for a side rail or insight column when that zone exists and matches the content.
+- Avoid overlapping section rectangles; keep spacing within the aesthetic rules below.
+
+Aesthetic rules (content + section placement)
+spacing_rules_px:
+{{
+  "outer_margin_px": 36,
+  "inner_gutter_px": 20,
+  "min_box_padding_px": 12,
+  "vertical_spacing_between_sections_px": 16,
+  "avoid_edge_crowding": true
+}}
+text_rules:
+{{
+  "title_max_lines": 2,
+  "title_max_words": 16,
+  "bullet_max_count": 5,
+  "bullet_max_words": 12,
+  "avoid_paragraphs": true,
+  "prefer_noun_phrases": true
+}}
+visual_rules:
+{{
+  "one_primary_focal_area": true,
+  "max_distinct_visual_elements": 5,
+  "prefer_alignment_to_grid": true,
+  "equal_box_heights_when_symmetric": true,
+  "no_decorative_shapes_without_information": true
+}}
+
+Compatibility:
+- Do NOT modify slide.sections visual fields like charts/frameworks/infographics/chart_data/framework_data.
+- You are only returning zone text and section placements.
+"""
+
     user_prompt = f"""
 PROBLEM STATEMENT:
 {problem_statement}
@@ -1971,6 +2043,8 @@ BASE object for zones (must respect):
         raw = completion.choices[0].message.content
         enhanced = _parse_json_loose(raw)
         if isinstance(enhanced, dict):
+            if isinstance(fixed_slide_design, dict) and fixed_slide_design.get("zones"):
+                enhanced["slide_design"] = fixed_slide_design
             return enhanced
     except Exception as e:
         print("slide_layout_zoning_single_call error:", e)
@@ -2143,17 +2217,22 @@ async def generate_slides_multi_step_stream(request: SlideRequest, authorization
                 )
                 if isinstance(visualized, dict):
                     deck["slides"][idx] = _merge_slide_preserve_section_assets(deck["slides"][idx], visualized)
-                # Step 4 (final): layout zoning for zone-based frontend rendering
+                # PPTX template pick + layout zoning (template geometry before client overlap/aesthetic pass)
                 try:
+                    fixed_sd = apply_pptx_template_to_slide(
+                        deck["slides"][idx],
+                        request.problem_statement,
+                        outline_titles,
+                    )
                     zoning = slide_layout_zoning_single_call(
                         problem_statement=request.problem_statement,
                         storyline=outline_titles,
                         num_slides=request.num_slides,
                         slide=deck["slides"][idx],
+                        fixed_slide_design=fixed_sd,
                     )
                     if isinstance(zoning, dict):
-                        if zoning.get("slide_design"):
-                            deck["slides"][idx]["slide_design"] = zoning.get("slide_design")
+                        deck["slides"][idx]["slide_design"] = fixed_sd
                         if zoning.get("zone_contents"):
                             deck["slides"][idx]["zone_contents"] = zoning.get("zone_contents")
                         if isinstance(zoning.get("suggested_layouts"), list):
